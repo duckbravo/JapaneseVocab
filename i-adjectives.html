@@ -232,7 +232,7 @@ body.sidebar-open {
   <div style="display: flex; justify-content: start; gap: 10px; margin-bottom: 1em;">
     <button onclick="shuffleTable()">🔀 Shuffle</button>
     <button onclick="startSequentialPlay()">▶ Play All</button>
-    <button id="pauseResumeBtn" onclick="togglePauseResume()">⏸ Pause</button>
+    <button id="pauseResumeBtn" onclick="pauseOrResume()">⏸ Pause</button>
     <button onclick="stopSequentialPlay()">⏹ Stop</button>
     <button onclick="resetTable()">🔄 Default</button>
   </div>
@@ -521,6 +521,22 @@ function stopSequentialPlay() {
   document.getElementById("pauseResumeBtn").textContent = "⏸ Pause";
 }
 
+function pauseOrResume() {
+  const audioPlayer = document.getElementById("audioPlayer");
+
+  if (!isPaused) {
+    isPaused = true;
+    audioPlayer.pause();
+    document.getElementById("pauseResumeBtn").textContent = "▶ Resume";
+  } else {
+    isPaused = false;
+    audioPlayer.play().then(() => {
+      document.getElementById("pauseResumeBtn").textContent = "⏸ Pause";
+    }).catch(err => {
+      console.error("Resume play error:", err);
+    });
+  }
+}
 
 
   function toggleSidebar() {
