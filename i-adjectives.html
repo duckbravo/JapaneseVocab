@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Japanese Vocabulary</title>
+  <title>Japanese I-adjective</title>
   <style>
     #sidebarToggle {
   font-size: 1.5rem;
@@ -202,6 +202,7 @@ body.sidebar-open {
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
+  
   <div id="sidebarToggle" onclick="toggleSidebar()">☰</div>
 
   <!-- Sidebar Navigation -->
@@ -221,9 +222,11 @@ body.sidebar-open {
 
   <!-- Your main content goes here -->
   <div class="main-content">
-    <h1>Verbs</h1>
+    <h1>i-Adjectives</h1>
     <!-- Table or other content -->
   </div>
+
+
 
   <h1>Japanese Vocabulary</h1>
   <div style="display: flex; justify-content: start; gap: 10px; margin-bottom: 1em;">
@@ -242,7 +245,6 @@ body.sidebar-open {
         <th>English</th>
         <th>Example</th>
         <th>Translation</th>
-        <th>More</th>
         <th>Play</th>
         <th>Play Example</th>
 
@@ -276,7 +278,7 @@ body.sidebar-open {
 
 
 async function loadVocabulary() {
-  const response = await fetch("verb_ready_final.csv");
+  const response = await fetch("iadjective_ready_final.csv");
   const csvText = await response.text();
 
   const parsed = Papa.parse(csvText, {
@@ -292,7 +294,7 @@ async function loadVocabulary() {
     const english = row["English"]?.trim().replace(/^"|"$/g, '') || "";
     const example = row["Example"]?.trim().replace(/^"|"$/g, '') || "";
     const translation = row["Translation"]?.trim().replace(/^"|"$/g, '') || "";
-    const more = row["More"]?.trim().replace(/^"|"$/g, '') || "";
+    const more = row.hasOwnProperty("More") ? row["More"]?.trim().replace(/^"|"$/g, '') : null;
 
 
     const displayKanji = kanji || hiragana;
@@ -317,10 +319,13 @@ async function loadVocabulary() {
     exampleCell.innerHTML = example; // Example already contains ruby tags
     tr.insertBefore(exampleCell, tr.children[3]);
 
-    const moreCell = document.createElement("td");
-    moreCell.setAttribute("data-label", "More");
-    moreCell.innerHTML = more;
-    tr.insertBefore(moreCell, tr.children[5]); // Insert after Translation (which is at index 4)
+    if (more !== null) {
+      const moreCell = document.createElement("td");
+      moreCell.setAttribute("data-label", "More");
+      moreCell.innerHTML = more;
+      tr.insertBefore(moreCell, tr.children[5]); // Insert after Translation
+    }
+
 
 
     tableBody.appendChild(tr);
@@ -333,7 +338,7 @@ async function loadVocabulary() {
 
     function playAudio(text) {
   const audioPlayer = document.getElementById("audioPlayer");
-  const basePath = `verb_sound/${text}`;
+  const basePath = `iadjective_sound/${text}`;
   
   // Stop and reset any current audio
   audioPlayer.pause();
@@ -371,7 +376,7 @@ async function loadVocabulary() {
 
 function playExampleAudio(text) {
   const audioPlayer = document.getElementById("audioPlayer");
-  const basePath = `verb_sound/${text}_ex`;
+  const basePath = `iadjective_sound/${text}_ex`;
 
   audioPlayer.pause();
   audioPlayer.currentTime = 0;
@@ -425,7 +430,7 @@ function playExampleAudio(text) {
     function playNext() {
       if (index >= audios.length) return;
       const current = audios[index];
-      audioPlayer.src = `verb_sound/${current}.mp3`;
+      audioPlayer.src = `iadjective_sound/${current}.mp3`;
       audioPlayer.play().then(() => {
         index++;
         setTimeout(playNext, 500); // 0.5s gap
@@ -471,7 +476,7 @@ function playExampleAudio(text) {
 
   const audioPlayer = document.getElementById("audioPlayer");
   const current = sequentialAudioList[sequentialIndex];
-  const basePath = `verb_sound/${current}`;
+  const basePath = `iadjective_sound/${current}`;
 
   // Play Japanese audio first
   audioPlayer.src = `${basePath}.wav`;
@@ -530,6 +535,8 @@ function stopSequentialPlay() {
   }
 }
 
+    loadVocabulary();
+  
 
   // Toggle dropdowns
   document.addEventListener("DOMContentLoaded", () => {
@@ -542,9 +549,8 @@ function stopSequentialPlay() {
     });
   });
 
-    loadVocabulary();
-  
   </script>
+  
   
 </body>
 </html>
