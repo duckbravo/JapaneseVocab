@@ -251,13 +251,17 @@ body.sidebar-open {
     <tbody></tbody>
   </table>
 
+  <div id="paginationControls" style="display: flex; justify-content: center; gap: 5px; margin-top: 1em;"></div>
+
   <audio id="audioPlayer" class="audio-player" controls></audio>
 
   <script>
-    let originalTableRows = [];
+    let originalVocabData = [];
+    let currentVocabData = [];
+    let currentPage = 1;
+    const rowsPerPage = 20;
 
-    function parseFurigana(text) {
-  return text.replace(/([^\[\]]+)\[([^\[\]]+)\]/g, (_, kanji, furigana) => {
+    function parseFurigana(text) { return text.replace(/([^\[\]]+)\[([^\[\]]+)\]/g, (_, kanji, furigana) => {
     // If length matches, split into separate ruby per character
     if (kanji.length === furigana.length) {
       return kanji.split('').map((k, i) => `<ruby>${k}<rt>${furigana[i]}</rt></ruby>`).join('');
@@ -283,10 +287,41 @@ async function loadVocabulary() {
     header: true,
     skipEmptyLines: true
   });
+  
+  originalVocabData = parsed.data;
+  currentVocabData = [...originalVocabData];
 
+  displayPage(1);
+  setupPagination();
+}
+
+function setupPagination() {
+  const paginationControls = document.getElementById("paginationControls");
+  paginationControls.innerHTML = "";
+  const pageCount = Math.ceil(currentVocabData.length / rowsPerPage);
+
+  for (let i = 1; i <= pageCount; i++) {
+    const btn = document.createElement("button");
+    btn.innerText = i;
+    btn.onclick = () => displayPage(i);
+    if (i === currentPage) {
+      btn.style.fontWeight = "bold";
+      btn.style.textDecoration = "underline";
+    }
+    paginationControls.appendChild(btn);
+  }
+}
+
+function displayPage(page) {
+  currentPage = page;
   const tableBody = document.querySelector("#vocabTable tbody");
+  tableBody.innerHTML = "";
 
-  parsed.data.forEach(row => {
+  const startIndex = (page - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const paginatedItems = currentVocabData.slice(startIndex, endIndex);
+
+  paginatedItems.forEach(row => {
     const hiragana = row["Hiragana"]?.trim().replace(/^"|"$/g, '') || "";
     const kanji = row["Kanji"]?.trim().replace(/^"|"$/g, '') || "";
     const english = row["English"]?.trim().replace(/^"|"$/g, '') || "";
@@ -325,10 +360,7 @@ async function loadVocabulary() {
 
     tableBody.appendChild(tr);
   });
-
-  originalTableRows = Array.from(tableBody.querySelectorAll("tr")).map(row => row.cloneNode(true));
 }
-
 
 
     function playAudio(text) {
@@ -385,27 +417,23 @@ function playExampleAudio(text) {
 
 
   function resetTable() {
-    const tbody = document.querySelector("#vocabTable tbody");
-    tbody.innerHTML = "";
-    originalTableRows.forEach(row => tbody.appendChild(row.cloneNode(true)));
+    currentVocabData = [...originalVocabData];
+    displayPage(1);
+    setupPagination();
   }
 
 
   function shuffleTable() {
-    const tbody = document.querySelector("#vocabTable tbody");
-    const rows = Array.from(tbody.querySelectorAll("tr"));
-
     // Fisher–Yates shuffle
-    for (let i = rows.length - 1; i > 0; i--) {
+    for (let i = currentVocabData.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [rows[i], rows[j]] = [rows[j], rows[i]];
+      [currentVocabData[i], currentVocabData[j]] = [currentVocabData[j], currentVocabData[i]];
     }
-
-    // Re-append shuffled rows
-    rows.forEach(row => tbody.appendChild(row));
+    displayPage(1);
+    setupPagination();
   }
 
-  function playAllSequentially() {
+  /* function playAllSequentially() {
     const rows = document.querySelectorAll("#vocabTable tbody tr");
     const audios = [];
 
@@ -437,27 +465,14 @@ function playExampleAudio(text) {
     }
 
     playNext();
-  }
+  } */
 
   let sequentialAudioList = [];
   let sequentialIndex = 0;
   let isPaused = false;
   let isStopped = false;
 
-  function startSequentialPlay() {
-    const rows = document.querySelectorAll("#vocabTable tbody tr");
-    sequentialAudioList = [];
-
-    rows.forEach(row => {
-      const button = row.querySelector(".play-btn");
-      if (button) {
-        const match = button.getAttribute("onclick").match(/playAudio\('(.+)'\)/);
-        if (match) {
-          sequentialAudioList.push(decodeURIComponent(match[1]));
-        }
-      }
-    });
-
+  function startSequentialPlay() { sequentialAudioList = currentVocabData.map(row => (row.Kanji || row.Hiragana)?.trim().replace(/^"|"$/g, '') || "").filter(Boolean);
     isPaused = false;
     isStopped = false;
     sequentialIndex = 0;
