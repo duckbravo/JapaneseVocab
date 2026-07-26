@@ -1,0 +1,379 @@
+#sidebarToggle {
+  font-size: 1.5rem;
+  cursor: pointer;
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 1001;
+  background: #007bff;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: background 0.3s;
+}
+#sidebarToggle:hover {
+  background: #0056b3;
+}
+
+#sidebar {
+  height: 100%;
+  width: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  background-color: #333;
+  overflow-x: hidden;
+  transition: width 0.3s ease;
+  padding-top: 60px;
+  z-index: 1000;
+}
+
+#sidebar ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+#sidebar ul li a {
+  padding: 12px 24px;
+  text-decoration: none;
+  font-size: 16px;
+  color: #f1f1f1;
+  display: block;
+  transition: background 0.3s;
+}
+
+#sidebar ul li a:hover {
+  background-color: #575757;
+}
+
+body.sidebar-open {
+  padding-left: 250px;
+}
+
+@media (max-width: 768px) {
+  body.sidebar-open {
+    padding-left: 0;
+  }
+}
+
+body {
+  font-family: "Segoe UI", sans-serif;
+  background-color: #f9f9f9;
+  padding: 2rem;
+  color: #333;
+}
+
+ruby {
+  ruby-position: over;
+}
+
+rt {
+  font-size: 0.6em;
+  color: #555;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  background-color: white;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+th, td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  overflow-wrap: break-word;
+}
+
+th {
+  background-color: #f2f2f2;
+}
+
+tr:hover {
+  background-color: #f5f5f5;
+}
+
+.play-btn {
+  cursor: pointer;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  transition: background 0.3s ease;
+}
+
+.play-btn:hover {
+  background-color: #0056b3;
+}
+
+.star-btn {
+  cursor: pointer;
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 16px;
+  color: #999;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.star-btn:hover {
+  border-color: #f5a623;
+}
+
+.star-btn.starred {
+  color: #f5a623;
+  border-color: #f5a623;
+}
+
+.audio-player {
+  display: none;
+}
+
+#vocabTable td:nth-child(1),
+#vocabTable td:nth-child(2) {
+  background-color: rgba(255, 117, 0, 0.2); /* Adjust transparency */
+  font-weight: bold; /* Make the text bold */
+}
+#vocabTable td:nth-child(3) {
+  background-color: rgba(255, 234, 0, 0.2); /* Highlight color (light cyan) */
+  font-weight: bold;
+}
+
+@media (max-width: 768px) {
+  table, thead, tbody, th, td, tr {
+    display: block;
+  }
+
+  th {
+    display: none;
+  }
+
+  td {
+    position: relative;
+    padding-left: 50%;
+    border: none;
+    border-bottom: 1px solid #eee;
+  }
+
+  td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 16px;
+    font-weight: bold;
+  }
+}
+
+.nav-section {
+  margin-bottom: 10px;
+}
+
+.dropdown-btn {
+  background-color: #f0f0f0;
+  color: #333;
+  padding: 10px;
+  width: 100%;
+  border: none;
+  text-align: left;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.dropdown-btn:hover {
+  background-color: #ddd;
+}
+
+.dropdown-content {
+  display: none;
+  flex-direction: column;
+  padding-left: 10px;
+}
+
+.dropdown-content a {
+  padding: 8px 10px;
+  text-decoration: none;
+  color: #007bff;
+  display: block;
+}
+
+.dropdown-content a:hover {
+  text-decoration: underline;
+}
+
+#accountSection {
+  border-top: 1px solid #575757;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+#accountSection a {
+  padding: 12px 24px;
+  text-decoration: none;
+  font-size: 16px;
+  color: #f1f1f1;
+  display: block;
+}
+
+#accountSection a:hover {
+  background-color: #575757;
+}
+
+#accountEmailLabel {
+  display: block;
+  padding: 6px 24px 0;
+  font-size: 13px;
+  color: #aaa;
+  word-break: break-all;
+}
+
+.auth-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-modal-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 320px;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.auth-modal-content h2 {
+  margin-top: 0;
+  text-align: left;
+}
+
+.auth-modal-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #888;
+}
+
+#authForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#authForm input {
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+#authForm button[type="submit"] {
+  cursor: pointer;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+#authForm button[type="submit"]:hover {
+  background-color: #0056b3;
+}
+
+.auth-error {
+  color: #c00;
+  font-size: 13px;
+  min-height: 1em;
+}
+
+.auth-error.auth-success {
+  color: #2a7;
+}
+
+.vocab-form {
+  max-width: 600px;
+  margin: 0 auto 2rem;
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.vocab-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.vocab-form input,
+.vocab-form textarea {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-weight: normal;
+}
+
+.vocab-form small {
+  font-weight: normal;
+  color: #777;
+}
+
+.furigana-preview {
+  min-height: 1.5em;
+  padding: 4px 0;
+}
+
+.vocab-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vocab-form-actions button {
+  cursor: pointer;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.vocab-form-actions button:hover {
+  background-color: #0056b3;
+}
+
+.vocab-form-actions #cancelEditBtn {
+  background-color: #999;
+}
+
+.vocab-form-actions #cancelEditBtn:hover {
+  background-color: #777;
+}

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Japanese I-adjective</title>
+  <title>My Saved Words</title>
   <link rel="stylesheet" href="css/site.css" />
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
@@ -54,55 +54,34 @@
     </div>
   </div>
 
-  <!-- Your main content goes here -->
-  <div class="main-content">
-    <h1>i-Adjectives</h1>
-    <!-- Table or other content -->
-  </div>
+  <h1>My Saved Words</h1>
 
-  <h1>Japanese Vocabulary</h1>
-  <div style="display: flex; justify-content: start; align-items: center; gap: 10px; margin-bottom: 1em;">
-    <button onclick="shuffleTable()">🔀 Shuffle</button>
-    <button onclick="startSequentialPlay()">▶ Play All</button>
-    <button id="pauseResumeBtn" onclick="pauseOrResume()">⏸ Pause</button>
-    <button onclick="stopSequentialPlay()">⏹ Stop</button>
-    <button onclick="resetTable()">🔄 Default</button>
-    <label for="rowsPerPageSelect">Rows per page:</label>
-    <select id="rowsPerPageSelect" onchange="changeRowsPerPage(this.value)">
-      <option value="10">10</option>
-      <option value="20" selected>20</option>
-      <option value="50">50</option>
-    </select>
-  </div>
+  <p id="guestNotice" style="display: none; text-align: center;">
+    Please <a href="#" id="guestLoginLink">log in</a> to see your saved words.
+  </p>
 
-  <table id="vocabTable">
+  <table id="savedWordsTable" style="display: none;">
     <thead>
       <tr>
         <th style="width: 10%;">Hiragana</th>
         <th style="width: 10%;">Kanji</th>
         <th style="width: 13%;">English</th>
         <th style="width: 26%;">Example</th>
-        <th style="width: 15%;">Translation</th>
-        <th style="width: 13%;">Play</th>
-        <th style="width: 13%;">Play Example</th>
-
+        <th style="width: 14%;">Translation</th>
+        <th style="width: 10%;">Type</th>
+        <th style="width: 8.5%;">Play</th>
+        <th style="width: 8.5%;">Play Example</th>
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 
-  <div id="paginationControls" style="display: flex; justify-content: center; gap: 5px; margin-top: 1em;"></div>
-
   <audio id="audioPlayer" class="audio-player" controls></audio>
 
   <script src="js/vocab-page.js"></script>
-  <script src="js/csv-vocab.js"></script>
   <script src="js/audio-player.js"></script>
   <script src="js/sidebar-nav.js"></script>
   <script type="module" src="js/auth-ui.js"></script>
-  <script src="js/saved-words.js"></script>
-  <script>
-    initVocabPage({ csv: "iadjective_ready_final.csv", soundDir: "iadjective_sound", hasMore: false, wordType: "i-adjective" });
-  </script>
+  <script src="js/my-saved-words.js"></script>
 </body>
 </html>
