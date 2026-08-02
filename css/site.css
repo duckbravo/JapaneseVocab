@@ -311,6 +311,45 @@ tr:hover {
   color: #2a7;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  margin: 0.75rem 0;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #ddd;
+}
+
+.auth-divider span {
+  padding: 0 0.75rem;
+}
+
+.google-signin-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  cursor: pointer;
+  background-color: white;
+  color: #444;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.google-signin-btn:hover {
+  background-color: #f5f5f5;
+}
+
 .vocab-form {
   max-width: 600px;
   margin: 0 auto 2rem;

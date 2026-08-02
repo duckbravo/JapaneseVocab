@@ -70,6 +70,21 @@ async function handleLogout() {
   await supabase.auth.signOut();
 }
 
+async function handleGoogleSignIn() {
+  const errorEl = document.getElementById('authError');
+  errorEl.textContent = '';
+  errorEl.classList.remove('auth-success');
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.href },
+  });
+
+  if (error) {
+    errorEl.textContent = error.message;
+  }
+}
+
 function initAuthUI() {
   document.getElementById('loginLink').addEventListener('click', (e) => {
     e.preventDefault();
@@ -88,6 +103,7 @@ function initAuthUI() {
     openAuthModal(authMode === 'login' ? 'signup' : 'login');
   });
   document.getElementById('authForm').addEventListener('submit', handleAuthSubmit);
+  document.getElementById('googleSignInBtn')?.addEventListener('click', handleGoogleSignIn);
 
   supabase.auth.getSession().then(({ data: { session } }) => {
     setAccountView(session);
