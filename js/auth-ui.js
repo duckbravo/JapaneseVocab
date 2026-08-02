@@ -48,11 +48,7 @@ async function handleAuthSubmit(e) {
   errorEl.textContent = '';
   errorEl.classList.remove('auth-success');
 
-<<<<<<< HEAD
   const { data, error } = authMode === 'login'
-=======
-  const { error } = authMode === 'login'
->>>>>>> 5f1321b630ece71ecb7e039848cdbdcf49f63bc6
     ? await supabase.auth.signInWithPassword({ email, password })
     : await supabase.auth.signUp({ email, password });
 
@@ -61,16 +57,12 @@ async function handleAuthSubmit(e) {
     return;
   }
 
-<<<<<<< HEAD
   // With email confirmation required, signUp() returns a user but no
   // session yet (session appears only after the confirmation link is
   // clicked). With confirmation disabled (e.g. a dev project), signUp()
   // returns an active session immediately, so there's nothing to "check
   // email" for and the user is already logged in.
   if (authMode === 'signup' && !data.session) {
-=======
-  if (authMode === 'signup') {
->>>>>>> 5f1321b630ece71ecb7e039848cdbdcf49f63bc6
     errorEl.classList.add('auth-success');
     errorEl.textContent = 'Check your email to confirm your account, then log in.';
     return;
@@ -79,27 +71,6 @@ async function handleAuthSubmit(e) {
   closeAuthModal();
 }
 
-<<<<<<< HEAD
-async function handleGoogleLogin() {
-  const errorEl = document.getElementById('authError');
-  errorEl.textContent = '';
-  errorEl.classList.remove('auth-success');
-
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.href }
-  });
-
-  // On success the browser navigates away to Google's consent screen, so
-  // there's nothing further to do here — only errors (e.g. provider not
-  // enabled) return without a redirect happening.
-  if (error) {
-    errorEl.textContent = error.message;
-  }
-}
-
-=======
->>>>>>> 5f1321b630ece71ecb7e039848cdbdcf49f63bc6
 async function handleLogout() {
   await supabase.auth.signOut();
 }
@@ -114,13 +85,15 @@ async function handleGoogleSignIn() {
     options: { redirectTo: window.location.href },
   });
 
+  // On success the browser navigates away to Google's consent screen, so
+  // there's nothing further to do here — only errors (e.g. provider not
+  // enabled) return without a redirect happening.
   if (error) {
     errorEl.textContent = error.message;
   }
 }
 
 function initAuthUI() {
-<<<<<<< HEAD
   // Every element lookup here is optional-chained: this function's tail end
   // (getSession()/onAuthStateChange(), which dispatch "auth-state-changed")
   // must always run even if a particular page is missing one of these
@@ -143,30 +116,7 @@ function initAuthUI() {
     openAuthModal(authMode === 'login' ? 'signup' : 'login');
   });
   document.getElementById('authForm')?.addEventListener('submit', handleAuthSubmit);
-  document.getElementById('googleLoginBtn')?.addEventListener('click', handleGoogleLogin);
-=======
-  document.getElementById('loginLink').addEventListener('click', (e) => {
-    e.preventDefault();
-    openAuthModal('login');
-  });
-  document.getElementById('logoutLink').addEventListener('click', (e) => {
-    e.preventDefault();
-    handleLogout();
-  });
-  document.getElementById('authModalClose').addEventListener('click', closeAuthModal);
-  document.getElementById('authModal').addEventListener('click', (e) => {
-    if (e.target.id === 'authModal') closeAuthModal();
-  });
-  document.getElementById('authToggleLink').addEventListener('click', (e) => {
-    e.preventDefault();
-    openAuthModal(authMode === 'login' ? 'signup' : 'login');
-  });
-  document.getElementById('authForm').addEventListener('submit', handleAuthSubmit);
-<<<<<<< HEAD
   document.getElementById('googleSignInBtn')?.addEventListener('click', handleGoogleSignIn);
-=======
->>>>>>> 5f1321b630ece71ecb7e039848cdbdcf49f63bc6
->>>>>>> main
 
   supabase.auth.getSession().then(({ data: { session } }) => {
     setAccountView(session);
