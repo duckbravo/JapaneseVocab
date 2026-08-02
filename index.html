@@ -4,404 +4,106 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Japanese Vocabulary</title>
-  <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background-color: #f9f9f9;
-      padding: 2rem;
-      color: #333;
-    }
-
-    ruby {
-  ruby-position: over;
-}
-
-  rt {
-    font-size: 0.6em;
-    color: #555;
-  }
-
-
-    h1 {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background-color: white;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-
-    th, td {
-      padding: 12px 16px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-    }
-
-    th {
-      background-color: #f2f2f2;
-    }
-
-    tr:hover {
-      background-color: #f5f5f5;
-    }
-
-    .play-btn {
-      cursor: pointer;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      padding: 6px 12px;
-      font-size: 14px;
-      transition: background 0.3s ease;
-    }
-
-    .play-btn:hover {
-      background-color: #0056b3;
-    }
-
-    .audio-player {
-      display: none;
-    }
-
-    #vocabTable td:nth-child(1),
-    #vocabTable td:nth-child(2) {
-      width: 150px; /* Adjust width as needed */
-      background-color: rgba(255, 117, 0, 0.2); /* Adjust transparency */
-      font-weight: bold; /* Make the text bold */
-    }
-    #vocabTable td:nth-child(3) {
-      background-color: rgba(255, 234, 0, 0.2); /* Highlight color (light cyan) */
-      font-weight: bold;
-    }
-
-
-    @media (max-width: 768px) {
-      table, thead, tbody, th, td, tr {
-        display: block;
-      }
-
-      th {
-        display: none;
-      }
-
-      td {
-        position: relative;
-        padding-left: 50%;
-        border: none;
-        border-bottom: 1px solid #eee;
-      }
-
-      td::before {
-        content: attr(data-label);
-        position: absolute;
-        left: 16px;
-        font-weight: bold;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="css/site.css" />
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
+  <div id="sidebarToggle" onclick="toggleSidebar()">☰</div>
+
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar">
+    <ul>
+      <li><a href="index.html">🏠 Home</a></li>
+      <li><a href="index.html">Verbs</a></li>
+      <li>
+        <button class="dropdown-btn">Adjectives ▼</button>
+        <div class="dropdown-content">
+          <a href="i-adjectives.html">i-Adjectives</a>
+          <!-- <a href="naadjectives.html">na-Adjectives</a> -->
+        </div>
+      </li>
+      <li id="accountSection">
+        <span id="accountGuestView">
+          <a href="#" id="loginLink">🔐 Log In / Sign Up</a>
+        </span>
+        <span id="accountUserView" style="display: none;">
+          <span id="accountEmailLabel"></span>
+          <a href="my-saved-words.html">⭐ My Saved Words</a>
+          <a href="my-vocab.html">📝 My Vocab</a>
+          <a href="#" id="logoutLink">🚪 Log Out</a>
+        </span>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- Login / Sign Up Modal -->
+  <div id="authModal" class="auth-modal">
+    <div class="auth-modal-content">
+      <button id="authModalClose" class="auth-modal-close" aria-label="Close">&times;</button>
+      <h2 id="authModalTitle">Log In</h2>
+      <form id="authForm">
+        <input type="email" id="authEmail" placeholder="Email" autocomplete="email" required />
+        <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password" required />
+        <div id="authError" class="auth-error"></div>
+        <button type="submit" id="authSubmitBtn">Log In</button>
+      </form>
+      <p>
+        <span id="authToggleText">Don't have an account?</span>
+        <a href="#" id="authToggleLink">Sign Up</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Your main content goes here -->
+  <div class="main-content">
+    <h1>Verbs</h1>
+    <!-- Table or other content -->
+  </div>
+
   <h1>Japanese Vocabulary</h1>
-  <div style="display: flex; justify-content: start; gap: 10px; margin-bottom: 1em;">
+  <div style="display: flex; justify-content: start; align-items: center; gap: 10px; margin-bottom: 1em;">
     <button onclick="shuffleTable()">🔀 Shuffle</button>
     <button onclick="startSequentialPlay()">▶ Play All</button>
-    <button id="pauseResumeBtn" onclick="togglePauseResume()">⏸ Pause</button>
+    <button id="pauseResumeBtn" onclick="pauseOrResume()">⏸ Pause</button>
     <button onclick="stopSequentialPlay()">⏹ Stop</button>
     <button onclick="resetTable()">🔄 Default</button>
+    <label for="rowsPerPageSelect">Rows per page:</label>
+    <select id="rowsPerPageSelect" onchange="changeRowsPerPage(this.value)">
+      <option value="10">10</option>
+      <option value="20" selected>20</option>
+      <option value="50">50</option>
+    </select>
   </div>
-  
+
   <table id="vocabTable">
     <thead>
       <tr>
-        <th>Hiragana</th>
-        <th>Kanji</th>
-        <th>English</th>
-        <th>Example</th>
-        <th>Translation</th>
-        <th>More</th>
-        <th>Play</th>
-        <th>Play Example</th>
+        <th style="width: 9%;">Hiragana</th>
+        <th style="width: 9%;">Kanji</th>
+        <th style="width: 11%;">English</th>
+        <th style="width: 23%;">Example</th>
+        <th style="width: 13%;">Translation</th>
+        <th style="width: 13%;">More</th>
+        <th style="width: 11%;">Play</th>
+        <th style="width: 11%;">Play Example</th>
 
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 
+  <div id="paginationControls" style="display: flex; justify-content: center; gap: 5px; margin-top: 1em;"></div>
+
   <audio id="audioPlayer" class="audio-player" controls></audio>
 
+  <script src="js/vocab-page.js"></script>
+  <script src="js/csv-vocab.js"></script>
+  <script src="js/audio-player.js"></script>
+  <script src="js/sidebar-nav.js"></script>
+  <script type="module" src="js/auth-ui.js"></script>
+  <script src="js/saved-words.js"></script>
   <script>
-    let originalTableRows = [];
-
-    function parseFurigana(text) {
-  return text.replace(/([^\[\]]+)\[([^\[\]]+)\]/g, (_, kanji, furigana) => {
-    // If length matches, split into separate ruby per character
-    if (kanji.length === furigana.length) {
-      return kanji.split('').map((k, i) => `<ruby>${k}<rt>${furigana[i]}</rt></ruby>`).join('');
-    } else {
-      // fallback to full word ruby
-      return `<ruby>${kanji}<rt>${furigana}</rt></ruby>`;
-    }
-  });
-}
-
-
-
-
-
-
-
-
-async function loadVocabulary() {
-  const response = await fetch("verb_ready_final.csv");
-  const csvText = await response.text();
-
-  const parsed = Papa.parse(csvText, {
-    header: true,
-    skipEmptyLines: true
-  });
-
-  const tableBody = document.querySelector("#vocabTable tbody");
-
-  parsed.data.forEach(row => {
-    const hiragana = row["Hiragana"]?.trim().replace(/^"|"$/g, '') || "";
-    const kanji = row["Kanji"]?.trim().replace(/^"|"$/g, '') || "";
-    const english = row["English"]?.trim().replace(/^"|"$/g, '') || "";
-    const example = row["Example"]?.trim().replace(/^"|"$/g, '') || "";
-    const translation = row["Translation"]?.trim().replace(/^"|"$/g, '') || "";
-    const more = row["More"]?.trim().replace(/^"|"$/g, '') || "";
-
-
-    const displayKanji = kanji || hiragana;
-    const tr = document.createElement("tr");
-
-    tr.innerHTML = `
-    <td data-label="Hiragana">${hiragana}</td>
-    <td data-label="Kanji">${kanji || "-"}</td>
-    <td data-label="English">${english}</td>
-    <td data-label="Translation">${translation}</td>
-    <td data-label="Play">
-      <button class="play-btn" onclick="playAudio('${encodeURIComponent(displayKanji)}')">▶</button>
-    </td>
-    <td data-label="Play Example">
-        <button class="play-btn" onclick="playExampleAudio('${encodeURIComponent(displayKanji)}')">🎧</button>
-    </td>
-   `;
-
-
-    const exampleCell = document.createElement("td");
-    exampleCell.setAttribute("data-label", "Example");
-    exampleCell.innerHTML = example; // Example already contains ruby tags
-    tr.insertBefore(exampleCell, tr.children[3]);
-
-    const moreCell = document.createElement("td");
-    moreCell.setAttribute("data-label", "More");
-    moreCell.innerHTML = more;
-    tr.insertBefore(moreCell, tr.children[5]); // Insert after Translation (which is at index 4)
-
-
-    tableBody.appendChild(tr);
-  });
-
-  originalTableRows = Array.from(tableBody.querySelectorAll("tr")).map(row => row.cloneNode(true));
-}
-
-
-
-    function playAudio(text) {
-  const audioPlayer = document.getElementById("audioPlayer");
-  const basePath = `verb_sound/${text}`;
-  
-  // Stop and reset any current audio
-  audioPlayer.pause();
-  audioPlayer.currentTime = 0;
-  audioPlayer.src = "";
-
-  // Remove any lingering event listeners
-  audioPlayer.onended = null;
-
-  // Step 1: Play Japanese
-  audioPlayer.src = `${basePath}.wav`;
-  audioPlayer.play()
-    .then(() => {
-      // Step 2: After Japanese ends, play English
-      audioPlayer.onended = () => {
-        audioPlayer.onended = null; // Prevent recursion
-        setTimeout(() => {
-          audioPlayer.src = `${basePath}_eng.mp3`;
-          audioPlayer.play()
-            .then(() => {
-              // Step 3: Clear onended after English
-              audioPlayer.onended = () => {
-                audioPlayer.onended = null;
-              };
-            })
-            .catch(err => console.error("Error playing English audio:", err));
-        }, 300); // 0.3s delay
-      };
-    })
-    .catch(err => {
-      console.error("Error playing Japanese audio:", err);
-    });
-}
-
-
-function playExampleAudio(text) {
-  const audioPlayer = document.getElementById("audioPlayer");
-  const basePath = `verb_sound/${text}_ex`;
-
-  audioPlayer.pause();
-  audioPlayer.currentTime = 0;
-  audioPlayer.src = "";
-
-  audioPlayer.src = `${basePath}.wav`;
-  audioPlayer.play().catch(err => {
-    console.error("Error playing example audio:", err);
-  });
-}
-
-
-  function resetTable() {
-    const tbody = document.querySelector("#vocabTable tbody");
-    tbody.innerHTML = "";
-    originalTableRows.forEach(row => tbody.appendChild(row.cloneNode(true)));
-  }
-
-
-  function shuffleTable() {
-    const tbody = document.querySelector("#vocabTable tbody");
-    const rows = Array.from(tbody.querySelectorAll("tr"));
-
-    // Fisher–Yates shuffle
-    for (let i = rows.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [rows[i], rows[j]] = [rows[j], rows[i]];
-    }
-
-    // Re-append shuffled rows
-    rows.forEach(row => tbody.appendChild(row));
-  }
-
-  function playAllSequentially() {
-    const rows = document.querySelectorAll("#vocabTable tbody tr");
-    const audios = [];
-
-    rows.forEach(row => {
-      const button = row.querySelector(".play-btn");
-      if (button) {
-        const match = button.getAttribute("onclick").match(/playAudio\('(.+)'\)/);
-        if (match) {
-          audios.push(decodeURIComponent(match[1]));
-        }
-      }
-    });
-
-    let index = 0;
-    const audioPlayer = document.getElementById("audioPlayer");
-
-    function playNext() {
-      if (index >= audios.length) return;
-      const current = audios[index];
-      audioPlayer.src = `verb_sound/${current}.mp3`;
-      audioPlayer.play().then(() => {
-        index++;
-        setTimeout(playNext, 500); // 0.5s gap
-      }).catch(err => {
-        console.error("Audio error:", err);
-        index++;
-        setTimeout(playNext, 500);
-      });
-    }
-
-    playNext();
-  }
-
-  let sequentialAudioList = [];
-  let sequentialIndex = 0;
-  let isPaused = false;
-  let isStopped = false;
-
-  function startSequentialPlay() {
-    const rows = document.querySelectorAll("#vocabTable tbody tr");
-    sequentialAudioList = [];
-
-    rows.forEach(row => {
-      const button = row.querySelector(".play-btn");
-      if (button) {
-        const match = button.getAttribute("onclick").match(/playAudio\('(.+)'\)/);
-        if (match) {
-          sequentialAudioList.push(decodeURIComponent(match[1]));
-        }
-      }
-    });
-
-    isPaused = false;
-    isStopped = false;
-    sequentialIndex = 0;
-
-    playNextSequential();
-  }
-
-  function playNextSequential() {
-  if (isStopped || sequentialIndex >= sequentialAudioList.length) return;
-  if (isPaused) return;
-
-  const audioPlayer = document.getElementById("audioPlayer");
-  const current = sequentialAudioList[sequentialIndex];
-  const basePath = `verb_sound/${current}`;
-
-  // Play Japanese audio first
-  audioPlayer.src = `${basePath}.wav`;
-  audioPlayer.play().then(() => {
-    audioPlayer.onended = () => {
-      if (isPaused || isStopped) return;
-
-      // Wait 0.3s → play English translation
-      setTimeout(() => {
-        audioPlayer.src = `${basePath}_eng.mp3`;
-        audioPlayer.play().then(() => {
-          audioPlayer.onended = () => {
-            if (isPaused || isStopped) return;
-            sequentialIndex++;
-            setTimeout(() => {
-              playNextSequential();
-            }, 500); // 0.5s after English ends
-          };
-        }).catch(err => {
-          console.error("English audio error:", err);
-          // Skip to next
-          sequentialIndex++;
-          setTimeout(playNextSequential, 500);
-        });
-      }, 300);
-    };
-  }).catch(err => {
-    console.error("Japanese audio error:", err);
-    sequentialIndex++;
-    setTimeout(playNextSequential, 500);
-  });
-}
-
-
-function stopSequentialPlay() {
-  isStopped = true;
-  isPaused = false;
-  sequentialIndex = 0;
-  const audioPlayer = document.getElementById("audioPlayer");
-  audioPlayer.pause();
-  audioPlayer.currentTime = 0;
-  document.getElementById("pauseResumeBtn").textContent = "⏸ Pause";
-}
-
-
-
-  
-    loadVocabulary();
+    initVocabPage({ csv: "verb_ready_final.csv", soundDir: "verb_sound", hasMore: true, wordType: "verb" });
   </script>
-  
 </body>
 </html>

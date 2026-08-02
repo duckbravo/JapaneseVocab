@@ -311,6 +311,7 @@ tr:hover {
   color: #2a7;
 }
 
+<<<<<<< HEAD
 .auth-divider {
   display: flex;
   align-items: center;
@@ -361,6 +362,8 @@ tr:hover {
   flex-shrink: 0;
 }
 
+=======
+>>>>>>> 5f1321b630ece71ecb7e039848cdbdcf49f63bc6
 .vocab-form {
   max-width: 600px;
   margin: 0 auto 2rem;
