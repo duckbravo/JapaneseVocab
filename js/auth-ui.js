@@ -120,7 +120,13 @@ async function handleGoogleSignIn() {
 
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: window.location.href },
+    options: {
+      redirectTo: window.location.href,
+      // Without this, Google silently reuses the browser's existing session
+      // cookie and skips straight to the last-used account instead of
+      // showing the account chooser.
+      queryParams: { prompt: 'select_account' },
+    },
   });
 
   // On success the browser navigates away to Google's consent screen, so
