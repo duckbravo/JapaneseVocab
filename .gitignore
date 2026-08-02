@@ -1,0 +1,54 @@
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python (data-prep / audio-gen scripts, if used)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Hosting / deploy
+.netlify/
+.vercel/
+.wrangler/
+
+# Supabase local dev
+supabase/.branches/
+supabase/.temp/
+
+# Playwright MCP output (screenshots, snapshots, console logs)
+.playwright-mcp/
+page-*.png
+page-*.jpeg
+
+# Logs
+*.log
