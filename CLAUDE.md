@@ -30,27 +30,26 @@ with zero tooling.
 ## Architecture
 
 ### Multi-page, shared-module pattern
-`i-adjectives.html`, `my-saved-words.html`, and `my-vocab.html` are thin HTML
-shells: the same sidebar/login-modal markup, `css/site.css`, the same
+`index.html`, `i-adjectives.html`, `my-saved-words.html`, and `my-vocab.html`
+are thin HTML shells: the same sidebar markup, `css/site.css`, the same
 `<script>` include list (subset varies per page depending on which features
 it needs — e.g. `my-vocab.html` skips `csv-vocab.js`/`audio-player.js` since
 it only does custom-vocab CRUD), and — for pages with a CSV table —  a small
 inline script at the bottom calling
 `initVocabPage({ csv, soundDir, hasMore, wordType })` (from
 `js/vocab-page.js`) to parameterize the shared logic. When adding a new page
-(e.g. a future `na-adjectives.html`), copy **`i-adjectives.html`**, not
-`index.html` (see below) — the actual behavior lives in `js/`.
+(e.g. a future `na-adjectives.html`), copy **`i-adjectives.html`** as the
+template — the actual behavior lives in `js/`.
 
-**`index.html` (the Verbs page) is the one exception and is *not* migrated
-to this pattern.** It predates the shared-module refactor: inline `<style>`
-instead of `css/site.css`, no sidebar/login modal, no `js/*.js` includes,
-and a single inline `<script>` block that reimplements CSV loading,
-pagination-free table rendering, audio playback, and shuffle/reset from
-scratch (duplicating what `js/csv-vocab.js`/`js/audio-player.js` do for
-every other page). Treat it as legacy: don't copy it for new pages, and if
-you're asked to add a feature (auth, starring, sidebar) to the Verbs page,
-that means migrating `index.html` onto `initVocabPage()` first, not
-patching its inline script further.
+The login/signup modal is **not** part of that copied markup — it used to
+be, and hand-copying it into every HTML file is exactly what let pages drift
+out of sync (a bad merge once left one page's modal missing the Google
+sign-in button that every other page had). `js/auth-ui.js` now injects the
+modal into `document.body` at runtime via `injectAuthModal()`, so any page
+that includes `<script type="module" src="js/auth-ui.js">` gets an
+identical modal automatically — including future pages, with zero extra
+markup. If the modal needs to change, edit `injectAuthModal()` once; never
+paste modal `<div>` markup into an HTML file again.
 
 Shared modules and their responsibilities:
 - `js/vocab-page.js` — holds `vocabConfig` and `initVocabPage()`, the
@@ -67,15 +66,16 @@ Shared modules and their responsibilities:
 - `js/supabase-client.js` — **ES module** (`type="module"`). Creates the
   singleton Supabase client and also assigns it to `window.supabaseClient`,
   because classic (non-module) scripts can't `import` it directly.
-- `js/auth-ui.js` — **ES module**. Login/signup modal (email+password and
-  Google OAuth), sidebar account section, session restore. On every auth
-  change it dispatches a `auth-state-changed` CustomEvent on `document`
-  (`detail: { session }`) — this is the bridge classic scripts use to react
-  to login state without importing a module. `initAuthUI()` guards every
-  element lookup with `?.` since not every page has every optional piece
-  (e.g. only pages with the Google button need it present); don't remove
-  that guarding — a hard crash here previously broke session restore on any
-  page missing one element.
+- `js/auth-ui.js` — **ES module**. Injects the login/signup modal
+  (email+password and Google OAuth) into the page via `injectAuthModal()` —
+  see "Multi-page, shared-module pattern" above — plus wires up the sidebar
+  account section and session restore. On every auth change it dispatches a
+  `auth-state-changed` CustomEvent on `document` (`detail: { session }`) —
+  this is the bridge classic scripts use to react to login state without
+  importing a module. `initAuthUI()` guards every element lookup with `?.`
+  since not every page has every optional sidebar piece; don't remove that
+  guarding — a hard crash here previously broke session restore on any page
+  missing one element.
 - `js/saved-words.js` — star/bookmark toggling against `user_word_state`,
   plus `rows_per_page` preference persistence. Classic script; listens for
   `auth-state-changed`.
