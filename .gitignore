@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # OS
 .DS_Store
 .DS_Store?
@@ -53,10 +52,3 @@ page-*.jpeg
 
 # Logs
 *.log
-=======
-.DS_Store
-.env
-.env.local
-node_modules/
-.netlify/
->>>>>>> 5f1321b630ece71ecb7e039848cdbdcf49f63bc6
