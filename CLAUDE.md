@@ -323,3 +323,13 @@ Workers, so there is no reason to migrate back.
   *production* KV namespace. There is no free preview/production isolation the
   way Pages had. Use local dev (which binds `preview_id`) for anything
   experimental.
+- Workers Builds runs a different command per branch: `wrangler deploy` on
+  `main` (releases to production) and `wrangler versions upload` on other
+  branches (uploads a version without releasing it). So a **failed branch build
+  cannot affect the live site** — worth remembering before panicking at a red
+  build. Note also that `wrangler deploy` from your machine uploads local files
+  directly, bypassing git entirely; the deployed code then matches no commit
+  until you push. Prefer pushing to `main` for routine changes.
+- `npx wrangler versions upload --dry-run` locally runs the same validation the
+  branch build does, which is the fastest way to tell a real config error from
+  a stale build.
