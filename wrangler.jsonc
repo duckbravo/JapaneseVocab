@@ -1,0 +1,40 @@
+{
+  // Cloudflare Worker config. `name` MUST match the existing Worker
+  // (dash/workers/services/view/japanesevocab) or a git build would deploy to a
+  // different Worker and the live site would appear not to update.
+  "name": "japanesevocab",
+
+  // The API entry point. Without `main` this is a static-assets-only Worker and
+  // every /api/* route 404s — that is the state the project was in before.
+  "main": "worker.js",
+
+  // Pin this. Left unset, wrangler defaults to *today*, and a date newer than
+  // the installed workerd supports makes `wrangler dev` refuse to start.
+  "compatibility_date": "2026-08-08",
+
+  // The repo root is the site. `.assetsignore` controls what is excluded —
+  // including worker.js/wrangler.jsonc/functions, which are source, not assets.
+  // `binding` is what lets worker.js hand non-API requests back to the asset
+  // server via env.ASSETS.fetch().
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS"
+  },
+
+  // Declared here rather than in the dashboard: version-controlled, applied on
+  // every deploy, and impossible to forget after a redeploy.
+  //   id         -> used by deployments
+  //   preview_id -> used by `wrangler dev`, so local testing never touches
+  //                 real users' encrypted keys
+  "kv_namespaces": [
+    {
+      "binding": "LLM_KEYS",
+      "id": "6b198bd41b9c421eae9df6de832c6e47",
+      "preview_id": "81c66c85a5414e298846a566adc9f822"
+    }
+  ]
+
+  // Secrets are NOT here. KEY_ENCRYPTION_SECRET, SUPABASE_URL and
+  // SUPABASE_PUBLISHABLE_KEY come from the dashboard (or `wrangler secret put`)
+  // in deployments, and from the gitignored .dev.vars locally.
+}

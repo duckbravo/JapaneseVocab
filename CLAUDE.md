@@ -17,22 +17,24 @@ with zero tooling.
 - **Run locally**: run **`dev.cmd`** on Windows / **`./dev.sh`** on macOS or
   Linux (double-click it, or Ctrl+Shift+B in VS Code, which picks the right
   one per platform). Both wrap
-  `npx wrangler pages dev . --kv LLM_KEYS --compatibility-date=2026-08-08 --live-reload`
+  `npx wrangler dev --port 8788 --live-reload --persist-to <temp dir>`
   (Node 18+, npx only — still no package.json) and open
   `http://localhost:8788`. `--live-reload` restores the auto-refresh-on-save
-  behaviour Live Server used to provide.
+  behaviour Live Server used to provide. Everything else — Worker name, entry
+  point, assets directory, KV binding, compatibility date — comes from
+  `wrangler.jsonc`, so no other flags are needed.
   If a page loads forever and never errors, a previous run left an orphaned
   `workerd` bound to the port — it accepts connections but never answers. Run
   **`stop-dev.cmd`** / **`./stop-dev.sh`** to clear it; both dev scripts also
   refuse to start when the port is already taken, rather than failing silently.
-  The explicit `--compatibility-date` is **required**:
-  with no wrangler config file, wrangler defaults it to *today*, and if that's
-  newer than the bundled `workerd` binary supports the runtime refuses to
-  start ("This Worker requires compatibility date X, but the newest date
-  supported by this server binary is Y"). Bump the date when you upgrade
-  wrangler. This is
-  now the canonical local server because it runs the Cloudflare Pages
-  Functions in `functions/` as well as serving the static files; a plain
+  **`--persist-to` is required, not an optimisation.** The assets directory is
+  the repo root, so wrangler watches the whole repo — including `.wrangler/`,
+  where miniflare continuously writes its own SQLite state. Wrangler reads that
+  write as an asset change, reloads, writes more state, and loops forever: 609
+  reloads in two minutes, with every request timing out. Moving the state
+  outside the watched tree is what breaks the cycle.
+  This is the canonical local server because it runs `worker.js` (and the
+  `functions/` modules it imports) as well as serving the static files; a plain
   static server (Live Server, `python -m http.server`) still works for the
   CSV pages but every `/api/*` route 404s, so `account-settings.html` can't
   be exercised. Don't run both side by side either — the two ports would
@@ -41,12 +43,12 @@ with zero tooling.
   imports (`js/auth-ui.js`, `js/supabase-client.js`) both require
   `http://`/`https://`.
   Local secrets go in `.dev.vars` at the repo root (gitignored; wrangler
-  reads it automatically) — see "Server-side" below for the variables. Note
-  `wrangler pages dev` serves the directory as-is and does **not** honour
-  `.assetsignore`, so `.dev.vars` really is fetchable at
-  `localhost:8788/.dev.vars` while the dev server runs. That's local-only
-  (it's gitignored, so it never reaches a deploy), but don't expose the dev
-  server beyond localhost.
+  reads it automatically) — see "Server-side" below for the variables.
+  `wrangler dev` *does* honour `.assetsignore` (verified: `/.dev.vars`,
+  `/worker.js`, `/wrangler.jsonc` and `/functions/...` all 404 locally), which
+  the older `wrangler pages dev` did not.
+  Local dev binds KV to the namespace in `preview_id`, never the production
+  one, so experimenting here cannot touch real users' encrypted keys.
 - **Apply a Supabase migration**: there's no Supabase CLI linked in this
   repo. Paste the contents of the relevant file in `supabase/migrations/`
   into the target project's Supabase SQL Editor and run it. New schema
@@ -181,13 +183,15 @@ scripts, and why `window.supabaseClient` bridging exists at all.
 - Google OAuth requires provider setup in the Supabase dashboard plus a
   Google Cloud OAuth client — not something a code change alone can enable.
 
-### Server-side (Cloudflare Pages Functions)
-`functions/` holds the repo's only server-side code. It exists because users
-bring their **own** LLM API key (Gemini / Anthropic / OpenAI) and a key must
-never be readable by the browser. Still no build step — Pages Functions are
+### Server-side (Cloudflare Worker)
+`worker.js` + `functions/` hold the repo's only server-side code. It exists
+because users bring their **own** LLM API key (Gemini / Anthropic / OpenAI) and
+a key must never be readable by the browser. Still no build step — these are
 plain ESM files that Cloudflare bundles at deploy time.
 
 ```
+worker.js             THE ENTRY POINT — routes /api/*, hands everything else to env.ASSETS
+wrangler.jsonc        name/main/assets/KV binding/compatibility_date
 functions/api/
   _middleware.js      auth + no-store for every /api/* request
   _lib/               helpers — http, auth, crypto, kv, providers, keys, ratelimit
@@ -198,10 +202,23 @@ functions/api/
     active.js         POST /api/llm-keys/active
 ```
 
-- **Only files exporting `onRequest[Method]` become routes.** That's why
-  `_lib/*.js` helper modules are safe to put under `functions/` — they export
-  plain functions, so the file-path router emits nothing for them.
-  `_middleware` is the one specially-cased filename.
+**This site is a Worker with static assets, NOT a Pages project.** That
+distinction is load-bearing and easy to get wrong, because the `functions/`
+layout and the `onRequest<Method>` export names are *Pages* conventions. A
+Worker has a single entry point and would never compile that directory on its
+own. `worker.js` reproduces the small part of the Pages contract the handlers
+rely on: a path→module table, `onRequest<Method>` dispatch, the
+`{ request, env, data, next, waitUntil }` context, and `_middleware` wrapping
+every `/api/*` request. The handlers stay in Pages shape deliberately — they
+remain portable, and helper modules under `_lib/` are still inert because
+nothing imports them as routes.
+
+- **Adding an endpoint = new file under `functions/api/` + one line in `ROUTES`
+  in `worker.js`.** Unlike Pages, that table is hand-maintained; forget the line
+  and the route 404s immediately.
+- Symptom to recognise: if the dashboard says *"Variables cannot be added to a
+  Worker that only has static assets"*, the deployed version has no `main` —
+  i.e. `wrangler.jsonc`/`worker.js` didn't reach the deploy.
 - **Auth**: the browser sends its Supabase access token as
   `Authorization: Bearer …`; `_lib/auth.js` verifies it by calling
   `GET {SUPABASE_URL}/auth/v1/user`, not by checking the JWT signature
@@ -225,45 +242,41 @@ functions/api/
    exactly two call sites: `llm-keys/validate.js` and `_lib/keys.js` (the seam
    for the future generation endpoint). Preserve both when extending this.
 
-**Secrets and bindings** — set by hand in the Cloudflare dashboard, per
-environment (Production *and* Preview), then **redeploy**: binding and
-env-var changes do not apply to existing deployments, and that is by far the
-most common cause of `LLM_KEYS is undefined`.
+**Bindings live in `wrangler.jsonc`, not the dashboard.** The `LLM_KEYS` KV
+binding is declared as code, so it is version-controlled, applied on every
+deploy, and impossible to forget after a redeploy. Editing bindings in the
+dashboard on a config-managed Worker is the wrong move — the next deploy
+overwrites it.
 
-**Order matters: deploy the Functions BEFORE trying to configure them.** On a
-project whose latest deployment contains only static files, the dashboard
+**Order matters: deploy the Worker BEFORE trying to configure secrets.** On a
+Worker whose latest deployment contains only static files, the dashboard
 refuses variables outright — *"Variables cannot be added to a Worker that only
-has static assets"* — and bindings silently do nothing, because there is no
-server-side code to attach them to. So: push `functions/` first, confirm the
-build compiled it, then add the binding and variables, then redeploy.
+has static assets"* — because there is no server-side code to attach them to.
+So: deploy `worker.js` + `wrangler.jsonc` first, then add the three secrets,
+then redeploy so they reach a running version.
 
-Dashboard paths (verified Aug 2026 — Cloudflare renames these periodically,
-so trust the deployed behaviour over these labels):
-- Namespaces: **Storage & Databases → KV → Create namespace**
-- Bindings: project → **Settings → Bindings → Add → KV namespace**
-- Variables/secrets: project → **Settings → Variables and Secrets → Add**,
-  with an **Encrypt** checkbox in the dialog to make a value a secret.
-- `wrangler pages secret put` exists but takes only `--project-name` — no
-  environment flag — so it can't set Preview, and it can't create bindings
-  at all. The dashboard is the only route for both.
+Only the **secrets** are set by hand (they must never be committed). Either
+`npx wrangler secret put <NAME>` from the repo root, or the dashboard at
+**Settings → Variables and Secrets → Add**, with the **Encrypt** checkbox to
+make a value a secret. (Dashboard paths verified Aug 2026 — Cloudflare renames
+these periodically, so trust deployed behaviour over these labels.)
 
 What to set:
-- KV binding `LLM_KEYS` → a KV namespace (use a separate one for Preview so
-  branch experiments can't corrupt real users' keys).
-- `KEY_ENCRYPTION_SECRET` — `openssl rand -base64 32`, stored **encrypted**.
-  Use a *different* value for Preview than Production: a preview leak must
-  not decrypt production data. It lives only in the CF dashboard and in a
-  local gitignored `.dev.vars`; never in `js/`, never committed.
-- `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` — plain text, pointed at the
-  prod project for Production and the dev project for Preview. These must
-  match whichever project the browser authenticates against, or every request
-  401s.
+- `KEY_ENCRYPTION_SECRET` — 32 random bytes, base64
+  (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`),
+  stored **encrypted**. Use a value distinct from the local `.dev.vars` one.
+  It lives only in Cloudflare and in that gitignored file; never in `js/`,
+  never committed. Losing it makes every stored user key permanently
+  undecryptable — there is no recovery path by design.
+- `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` — must match whichever Supabase
+  project the browser authenticates against, or every request 401s in a way
+  that looks like a session bug rather than a config one.
 
-Diagnosing a misconfigured environment from the response to an unauthenticated
+Diagnosing a misconfigured deployment from the response to an unauthenticated
 `GET /api/llm-keys`: `401 unauthenticated` = Supabase vars are good;
-`503 server_misconfigured` = a Supabase var is missing; `404` = Functions
-didn't deploy. A `500` once authenticated means the `LLM_KEYS` binding is
-missing or the deploy predates it.
+`503 server_misconfigured` = a Supabase var is missing; `404` = the Worker
+didn't deploy (no `main`, so it's static-assets-only again). A `500` once
+authenticated means the `LLM_KEYS` binding didn't reach the running version.
 
 **Known debt**: deleting a Supabase account leaves an orphaned encrypted KV
 entry — nothing cleans it up. `DELETE /api/llm-keys?all=1` exists as the hook
@@ -273,31 +286,32 @@ deliberately best-effort dampening, not a security control — KV is eventually
 consistent and drops increments under burst.
 
 ### Hosting
-Live on **Cloudflare Pages**, git-connected to the `main` branch (chosen
-over Netlify/Vercel specifically for its secret/env-var storage for future
-server-side features, e.g. an AI chatbot proxy — keep this in mind if that
-gets built). GitHub Pages has been disabled; Cloudflare is the only
-deployment target.
+Live on Cloudflare as a **Worker with static assets** named `japanesevocab`
+(dash → Workers → `japanesevocab`), git-connected to the `main` branch.
+GitHub Pages has been disabled; Cloudflare is the only deployment target.
 
-Cloudflare's Pages git-integration deploys run through the same
-`wrangler deploy` / Workers-static-assets pipeline as native Workers
-projects (confirmed from build logs — this is Cloudflare's current
-direction, not just an implementation detail likely to change back). Two
-consequences that matter for this repo:
-- **`.assetsignore`** (repo root, gitignore syntax) excludes non-site
-  paths — `.git`, `.github`, `.claude`, `supabase`, `README.md`,
-  `CLAUDE.md`, `.mcp.json`, `.dev.vars` — from being uploaded as deployable
-  assets. This is required, not optional: without it, the build fails
-  outright (`.git`'s pack files exceed the Workers 25 MiB per-asset limit).
-  Any new top-level dir/file that isn't part of the served site should be
-  added here too.
-  `functions/` is deliberately **not** listed. Cloudflare treats it as a
-  reserved directory and compiles it rather than uploading it, but that
-  isn't guaranteed under the newer static-assets pipeline — so verify after
-  a deploy that `https://<site>/functions/api/_lib/crypto.js` 404s. If it
-  ever returns 200, add `functions` here and then re-check that
-  `/api/llm-keys` still answers 401 rather than 404. (No secrets live in the
-  function source either way — the exposure would be source visibility, not
-  a credential leak.)
+It is **not** a Pages project — `wrangler pages project list` returns empty for
+this account. Earlier notes in this file said "Cloudflare Pages"; that was
+wrong, and it cost real debugging time (the `functions/` directory would never
+have been compiled). Cloudflare's own guidance is to use Workers for anything
+mixing static content with dynamic logic, and that all new investment goes to
+Workers, so there is no reason to migrate back.
+
+- **`.assetsignore`** (repo root, gitignore syntax) excludes non-site paths
+  from being uploaded as deployable assets: `.git`, `.github`, `.claude`,
+  `supabase`, `README.md`, `CLAUDE.md`, `.mcp.json`, `.dev.vars`, the dev
+  scripts, and — importantly — `worker.js`, `wrangler.jsonc` and `functions`,
+  which are **server source, not assets**. Excluding them does not stop them
+  being compiled: only the asset manifest is filtered, while the bundler
+  follows `main` and its imports. Verified locally — all of those paths 404
+  while `/api/*` works.
+  This file is required, not optional: without it the build fails outright
+  (`.git`'s pack files exceed the Workers 25 MiB per-asset limit). Any new
+  top-level dir/file that isn't part of the served site belongs here too.
 - Per-asset size is capped at **25 MiB** — relevant if large audio/CSV
   files are ever added under a served directory.
+- Non-`main` branches produce **preview versions of the same Worker**, which
+  share its bindings and secrets — so a branch deploy writes to the
+  *production* KV namespace. There is no free preview/production isolation the
+  way Pages had. Use local dev (which binds `preview_id`) for anything
+  experimental.

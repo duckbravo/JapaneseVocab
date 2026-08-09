@@ -3,8 +3,8 @@ REM ---------------------------------------------------------------------------
 REM  Local dev server for the Japanese Vocab site.
 REM
 REM  Replaces VS Code "Live Server": this serves the static pages AND runs the
-REM  Cloudflare Pages Functions in functions/, so the /api/* routes that
-REM  account-settings.html depends on actually work. Live Server 404s on those.
+REM  Worker in worker.js, so the /api/* routes that account-settings.html
+REM  depends on actually work. Live Server 404s on those.
 REM
 REM  Double-click this file, or run  .\dev  in a terminal.
 REM  Extra arguments are passed through, e.g.  .\dev --port 3000
@@ -15,7 +15,7 @@ cd /d "%~dp0"
 echo.
 echo   Japanese Vocab - local dev server
 echo   ---------------------------------
-echo   Static pages + /api/* Pages Functions, with live reload.
+echo   Static pages + /api/* Worker routes, with live reload.
 echo.
 echo   URL:   http://localhost:8788
 echo   Stop:  Ctrl+C  (then Y)
@@ -46,14 +46,17 @@ REM Open a browser once the server has had a moment to boot. Detached so it
 REM doesn't block the server itself.
 start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 8; Start-Process 'http://localhost:8788'"
 
-REM --compatibility-date is REQUIRED. With no wrangler config file in the repo,
-REM wrangler defaults it to TODAY, and if that's newer than the bundled workerd
-REM binary supports, the runtime refuses to start with:
-REM   "This Worker requires compatibility date X, but the newest date supported
-REM    by this server binary is Y"
-REM If you hit that after upgrading wrangler, bump the date below. Any date the
-REM binary supports works; older is always safe.
-npx --yes wrangler@latest pages dev . --kv LLM_KEYS --compatibility-date=2026-08-08 --port 8788 --live-reload %*
+REM Settings now come from wrangler.jsonc (name, main, assets, KV binding,
+REM compatibility_date), so no flags are needed for those.
+REM
+REM --persist-to is REQUIRED, and not an optimisation. The assets directory is
+REM the repo root, so wrangler watches the whole repo - including .wrangler/,
+REM where miniflare continuously writes its own SQLite state. That write is seen
+REM as an asset change, which triggers a reload, which writes more state: an
+REM endless reload loop where the server never becomes reachable (observed: 609
+REM reloads in a couple of minutes, every request timing out). Keeping that state
+REM outside the watched tree breaks the cycle.
+npx --yes wrangler@latest dev --port 8788 --live-reload --persist-to "%TEMP%\japanesevocab-wrangler-state" %*
 
 REM Keep the window open if wrangler exited because of an error, so the message
 REM is readable when this was launched by double-clicking.

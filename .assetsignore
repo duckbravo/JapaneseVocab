@@ -14,3 +14,10 @@ dev.cmd
 dev.sh
 stop-dev.cmd
 stop-dev.sh
+# Server source, not site assets. Cloudflare bundles worker.js and everything
+# it imports from functions/ at deploy time; only the asset manifest is
+# filtered here, so excluding them does not stop them being compiled.
+worker.js
+wrangler.jsonc
+functions
+.wrangler
