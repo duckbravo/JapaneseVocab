@@ -272,11 +272,19 @@ What to set:
   project the browser authenticates against, or every request 401s in a way
   that looks like a session bug rather than a config one.
 
-Diagnosing a misconfigured deployment from the response to an unauthenticated
-`GET /api/llm-keys`: `401 unauthenticated` = Supabase vars are good;
-`503 server_misconfigured` = a Supabase var is missing; `404` = the Worker
-didn't deploy (no `main`, so it's static-assets-only again). A `500` once
-authenticated means the `LLM_KEYS` binding didn't reach the running version.
+Diagnosing a deployment, in order:
+- `GET /api/llm-keys` with **no** Authorization header → `404` means the Worker
+  didn't deploy (no `main`, so it's static-assets-only again); `401` means the
+  Worker is live and running this code. Note `requireUser()` checks for a
+  missing token *before* it checks env vars, so this request can never return
+  `503` — it says nothing about whether the secrets are set.
+- To test config, send a junk token (`Authorization: Bearer x`). Then
+  `503 server_misconfigured` = a Supabase var is missing, while
+  `401` *"Your session expired"* = the vars are good and Supabase actually
+  rejected the token. The two 401 messages are the tell: *"Please log in
+  again"* is the no-token path, *"Your session expired"* is the verified path.
+- A `500` once genuinely authenticated means the `LLM_KEYS` binding didn't
+  reach the running version.
 
 **Known debt**: deleting a Supabase account leaves an orphaned encrypted KV
 entry — nothing cleans it up. `DELETE /api/llm-keys?all=1` exists as the hook
