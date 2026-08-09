@@ -18,6 +18,9 @@ desktop.ini
 .env
 .env.*
 !.env.example
+# Local Cloudflare Pages Functions secrets (KEY_ENCRYPTION_SECRET etc.)
+.dev.vars
+.dev.vars.*
 
 # Node
 node_modules/

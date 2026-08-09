@@ -1,0 +1,22 @@
+# Line-ending rules.
+#
+# This repo is developed on Windows with core.autocrlf=true, which rewrites
+# checked-out files to CRLF. That breaks a shell script on macOS/Linux: bash
+# reads the `\r` as part of the shebang and fails with
+# "bad interpreter: /usr/bin/env bash^M". Pin the ones that care.
+
+* text=auto
+
+# Must stay LF or they won't run on macOS/Linux.
+*.sh text eol=lf
+
+# Windows batch files are happiest with CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary — never touch these.
+*.wav binary
+*.mp3 binary
+*.png binary
+*.jpg binary
+*.jpeg binary

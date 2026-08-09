@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Getting an AI API key</title>
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <div id="sidebarToggle" onclick="toggleSidebar()">☰</div>
+
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar">
+    <ul>
+      <li><a href="index.html">🏠 Home</a></li>
+      <li><a href="index.html">Verbs</a></li>
+      <li>
+        <button class="dropdown-btn">Adjectives ▼</button>
+        <div class="dropdown-content">
+          <a href="i-adjectives.html">i-Adjectives</a>
+          <!-- <a href="naadjectives.html">na-Adjectives</a> -->
+        </div>
+      </li>
+      <!-- Account links are injected by js/auth-ui.js — don't add markup here. -->
+      <li id="accountSection"></li>
+    </ul>
+  </nav>
+
+  <h1>Getting an AI API key</h1>
+
+  <!--
+    The <h2> ids here must match the `docsAnchor` of each entry in
+    functions/api/_lib/providers.js — the settings page deep-links to
+    api-key-setup.html#<docsAnchor>. Adding a provider means adding a section here.
+  -->
+  <div class="doc-page">
+    <p>
+      AI features on this site run on <strong>your own</strong> API key from an AI
+      provider. You create the key on their website, paste it once into
+      <a href="account-settings.html">Account Settings</a>, and this site stores it
+      encrypted so it can make requests on your behalf.
+    </p>
+
+    <p><strong>Which one should I pick?</strong></p>
+    <ul>
+      <li>
+        <a href="#gemini">Google Gemini</a>
+        <span class="pricing-pill pricing-free">Free tier</span> —
+        the only one you can use without paying. Start here.
+      </li>
+      <li>
+        <a href="#anthropic">Anthropic Claude</a>
+        <span class="pricing-pill pricing-paid">Paid</span> —
+        small one-off trial credit, then pay-as-you-go.
+      </li>
+      <li>
+        <a href="#openai">OpenAI</a>
+        <span class="pricing-pill pricing-paid">Paid</span> —
+        needs a payment method from the start.
+      </li>
+    </ul>
+    <p class="settings-note">
+      Prices and free tiers change often. These notes were checked in August 2026 —
+      always confirm on the provider's own pricing page.
+    </p>
+
+    <div class="callout callout-warn">
+      <p><strong>Before you start</strong></p>
+      <ul>
+        <li>An API key is a password for your account with that provider. Treat it like one.</li>
+        <li>
+          Usage is billed to <strong>you by the provider</strong>, not by this site.
+          Set a spending limit in their console before you start.
+        </li>
+        <li>
+          This site stores your key encrypted and <strong>never shows it again</strong>
+          after you save it — only the first few and last four characters, so you can
+          tell which key it is.
+        </li>
+        <li>Never paste a key into a chat, a screenshot, an email, or a GitHub issue.</li>
+        <li>
+          If you think a key has leaked, revoke it in the provider's console and create
+          a new one. Revoking is instant and free.
+        </li>
+      </ul>
+    </div>
+
+    <h2 id="gemini">Google Gemini <span class="pricing-pill pricing-free">Free tier</span></h2>
+    <p>
+      <strong>Start here.</strong> Gemini is the only one of the three with an ongoing
+      free tier, so you can use the AI features without a credit card. The others
+      need you to pay.
+    </p>
+    <ol>
+      <li>
+        Sign in at
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a>
+        with a Google account.
+      </li>
+      <li>Click <strong>Create API key</strong>, then choose or create a Google Cloud project.</li>
+      <li>
+        Copy the key. It will start with either <code>AQ.</code> or <code>AIza</code> —
+        both are accepted here, see below.
+      </li>
+      <li>
+        Paste it into the <strong>Google Gemini</strong> box on
+        <a href="account-settings.html">Account Settings</a> and press <strong>Save</strong>.
+      </li>
+    </ol>
+
+    <div class="callout callout-warn">
+      <p><strong>If your key starts with <code>AQ.</code> instead of <code>AIza</code></strong></p>
+      <p>
+        That's expected. Google is moving from older <em>Standard</em> keys
+        (<code>AIza…</code>) to newer <em>Authorization</em> keys
+        (<code>AQ.…</code>), and AI Studio now issues the new kind on most accounts.
+        Google has said Standard keys will stop working after <strong>September 2026</strong>.
+      </p>
+      <p>
+        The catch: many developers report that <code>AQ.</code> keys are currently
+        rejected by Google's own Gemini REST API with
+        <code>ACCESS_TOKEN_TYPE_UNSUPPORTED</code>, which is a problem on Google's
+        side, not with your key. So if you save an <code>AQ.</code> key here and it
+        shows <strong>Unverified</strong> rather than <strong>Working</strong>, the key is
+        kept anyway — press <strong>Re-check</strong> once Google has fixed it, and it
+        will flip to Working without you re-entering anything.
+      </p>
+    </div>
+
+    <p>
+      <strong>Cost:</strong> Google's Flash models are free of charge on the free tier
+      — that's what this site uses — with limits of roughly a few requests a minute
+      and a few hundred a day. That's plenty for filling in vocab entries. Their more
+      powerful Pro models are not part of the free tier. Heavier use needs billing
+      enabled on the linked Cloud project; check
+      <a href="https://ai.google.dev/pricing" target="_blank" rel="noopener noreferrer">ai.google.dev/pricing</a>
+      first.
+    </p>
+    <div class="callout callout-warn">
+      <p>
+        <strong>Privacy: the free tier is not private.</strong> Google's own pricing
+        page states that on the free tier your content <em>is</em> used to improve
+        their products — so the words, sentences and notes you send get used for
+        training. If you'd rather that didn't happen, enable billing on your Google
+        Cloud project, which moves you to the paid tier where content is not used for
+        training. This is Google's policy and applies wherever you use the key, not
+        just on this site.
+      </p>
+    </div>
+    <p>
+      <strong>If it says Google denied access:</strong> the key usually has API or
+      HTTP-referrer restrictions on it, or the Generative Language API isn't enabled
+      on its project. Both are fixed in the Google Cloud console.
+    </p>
+
+    <h2 id="anthropic">Anthropic Claude <span class="pricing-pill pricing-paid">Paid</span></h2>
+    <p>
+      There is no free tier. New Console accounts are generally given a small one-off
+      trial credit — enough to try things out — after which you have to buy credit.
+      Anthropic doesn't publish the trial amount, so treat it as "a little, once".
+    </p>
+    <ol>
+      <li>
+        Sign in at
+        <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer">platform.claude.com/settings/keys</a>.
+      </li>
+      <li>
+        Click <strong>Create key</strong>, give it a name you'll recognise later
+        (e.g. <code>japanese-vocab-site</code>), and optionally set an expiry.
+      </li>
+      <li>
+        The full key — starting with <code>sk-ant-</code> — is shown
+        <strong>only once</strong>. Copy it now.
+      </li>
+      <li>
+        Paste it into the <strong>Anthropic Claude</strong> box on
+        <a href="account-settings.html">Account Settings</a> and press <strong>Save</strong>.
+      </li>
+    </ol>
+    <p>
+      <strong>Cost:</strong> pay-as-you-go once any trial credit is used up. Add credit
+      under Billing and set a monthly spend limit. Current prices:
+      <a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noopener noreferrer">platform.claude.com pricing</a>.
+      Trial credit expires, so if you created an account a while ago and never used it,
+      check the balance before assuming it's still there.
+    </p>
+
+    <h2 id="openai">OpenAI <span class="pricing-pill pricing-paid">Paid</span></h2>
+    <p>
+      There is no free tier and no starter credit — you must add a payment method
+      before a key will do anything. If you only want to try the AI features, use
+      Gemini instead.
+    </p>
+    <ol>
+      <li>
+        Sign in at
+        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com/api-keys</a>.
+      </li>
+      <li>
+        Click <strong>Create new secret key</strong>, name it, and optionally restrict
+        it to a single project.
+      </li>
+      <li>
+        The key — starting with <code>sk-</code>, often <code>sk-proj-</code> — is shown
+        <strong>only once</strong>. Copy it now.
+      </li>
+      <li>
+        Paste it into the <strong>OpenAI</strong> box on
+        <a href="account-settings.html">Account Settings</a> and press <strong>Save</strong>.
+      </li>
+    </ol>
+    <p>
+      <strong>Cost:</strong> pay-as-you-go from the first request. Add credit under
+      Billing and set a usage limit. Prices:
+      <a href="https://openai.com/api/pricing/" target="_blank" rel="noopener noreferrer">openai.com/api/pricing</a>.
+    </p>
+    <p>
+      <strong>If it mentions quota:</strong> <code>insufficient_quota</code> means the
+      key itself is fine but the account has no credit on it.
+    </p>
+
+    <h2 id="troubleshooting">If saving doesn't work</h2>
+    <p>
+      When you press Save, this site makes one small test request to the provider to
+      check the key really works before storing it. What the message means:
+    </p>
+    <ul>
+      <li>
+        <strong>"rejected this key"</strong> — the provider says the key is wrong,
+        revoked, or from a different account. Copy it again from their console; keys
+        are easy to truncate when selecting by hand.
+      </li>
+      <li>
+        <strong>"That looks like a … key"</strong> — you've pasted a key for a
+        different provider into the wrong box. Use the button offered to move it to
+        the right one. Nothing was sent anywhere.
+      </li>
+      <li>
+        <strong>"couldn't be verified right now"</strong> — the provider was rate
+        limiting or having an outage. Your key <em>is</em> saved; press
+        <strong>Re-check</strong> in a minute to confirm it.
+      </li>
+      <li>
+        <strong>"rejected this key's type"</strong> — the Google <code>AQ.</code> key
+        issue described above. The key is saved as Unverified; nothing is wrong with
+        it on your end.
+      </li>
+      <li>
+        <strong>"Too many key checks"</strong> — there's a limit on how often keys can
+        be tested. Wait a minute and try again.
+      </li>
+    </ul>
+
+    <h2 id="revoking">Removing or replacing a key</h2>
+    <p>
+      Pressing <strong>Remove</strong> on Account Settings deletes this site's
+      encrypted copy of your key. To replace a key, just paste the new one over the
+      old — you don't need to remove it first.
+    </p>
+    <p>
+      <strong>Removing a key here does not revoke it at the provider.</strong> If the
+      key may have been exposed, also delete it in the provider's own console — that's
+      the only thing that actually stops it working.
+    </p>
+    <p>
+      If you delete your account on this site, remove your keys here first: account
+      deletion doesn't currently reach the encrypted key storage.
+    </p>
+
+    <h2 id="privacy">What this site stores</h2>
+    <ul>
+      <li>Your key, encrypted, so nobody can read it out of storage.</li>
+      <li>
+        A masked hint — the first six and last four characters — so you can tell which
+        key is saved.
+      </li>
+      <li>Whether it last passed a check, and when.</li>
+    </ul>
+    <p>
+      Your key is decrypted only on the server, only at the moment a request is made
+      on your behalf. It is never sent back to your browser and there is no page or
+      API on this site that will display it — including to the site owner.
+    </p>
+    <p>Keys are stored per account, so logging in elsewhere carries your setup with you.</p>
+  </div>
+
+  <script src="js/sidebar-nav.js"></script>
+  <script type="module" src="js/auth-ui.js"></script>
+</body>
+</html>

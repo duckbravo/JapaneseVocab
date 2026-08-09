@@ -3,13 +3,36 @@
 // on load and on every login/logout, so classic (non-module) scripts like the
 // future saved-words.js can react without importing this module directly.
 //
-// The modal markup itself is injected here (rather than hand-copied into
-// every HTML file) so every page — including future ones — gets an
-// identical modal just by including this script; there's no markup to keep
-// in sync or forget to update.
+// Both the modal markup AND the sidebar account links are injected here
+// (rather than hand-copied into every HTML file) so every page — including
+// future ones — gets identical markup just by including this script; there's
+// nothing to keep in sync or forget to update. An HTML page only needs an
+// empty `<li id="accountSection"></li>` in its sidebar.
 import { supabase } from './supabase-client.js';
 
 let authMode = 'login';
+
+// Fills the sidebar's `<li id="accountSection">` with the guest/logged-in
+// links. Hand-copying these into every page is what let one page's modal
+// drift out of sync before; adding a link here now reaches every page at
+// once, including ones that don't exist yet.
+function injectAccountLinks() {
+  const section = document.getElementById('accountSection');
+  if (!section || section.querySelector('#accountGuestView')) return;
+
+  section.innerHTML = `
+    <span id="accountGuestView">
+      <a href="#" id="loginLink">🔐 Log In / Sign Up</a>
+    </span>
+    <span id="accountUserView" style="display: none;">
+      <span id="accountEmailLabel"></span>
+      <a href="my-saved-words.html">⭐ My Saved Words</a>
+      <a href="my-vocab.html">📝 My Vocab</a>
+      <a href="account-settings.html">⚙️ Account Settings</a>
+      <a href="#" id="logoutLink">🚪 Log Out</a>
+    </span>
+  `;
+}
 
 function injectAuthModal() {
   if (document.getElementById('authModal')) return;
@@ -45,17 +68,22 @@ function injectAuthModal() {
 }
 
 function setAccountView(session) {
+  // Optional-chained for the same reason initAuthUI() is: a page missing the
+  // `<li id="accountSection">` host element must not throw here, because that
+  // would skip the dispatch below and silently break every classic script
+  // that depends on "auth-state-changed" (saved-words.js, custom-vocab.js,
+  // account-settings.js). The dispatch always runs.
   const guestView = document.getElementById('accountGuestView');
   const userView = document.getElementById('accountUserView');
   const emailLabel = document.getElementById('accountEmailLabel');
 
   if (session) {
-    guestView.style.display = 'none';
-    userView.style.display = '';
-    emailLabel.textContent = session.user.email;
+    if (guestView) guestView.style.display = 'none';
+    if (userView) userView.style.display = '';
+    if (emailLabel) emailLabel.textContent = session.user.email;
   } else {
-    guestView.style.display = '';
-    userView.style.display = 'none';
+    if (guestView) guestView.style.display = '';
+    if (userView) userView.style.display = 'none';
   }
 
   document.dispatchEvent(new CustomEvent('auth-state-changed', { detail: { session } }));
@@ -138,6 +166,9 @@ async function handleGoogleSignIn() {
 }
 
 function initAuthUI() {
+  // Inject markup before wiring listeners — #loginLink / #logoutLink only
+  // exist after injectAccountLinks() has run.
+  injectAccountLinks();
   injectAuthModal();
 
   // Every element lookup here is optional-chained: this function's tail end

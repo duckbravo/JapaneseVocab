@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Account Settings</title>
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <div id="sidebarToggle" onclick="toggleSidebar()">☰</div>
+
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar">
+    <ul>
+      <li><a href="index.html">🏠 Home</a></li>
+      <li><a href="index.html">Verbs</a></li>
+      <li>
+        <button class="dropdown-btn">Adjectives ▼</button>
+        <div class="dropdown-content">
+          <a href="i-adjectives.html">i-Adjectives</a>
+          <!-- <a href="naadjectives.html">na-Adjectives</a> -->
+        </div>
+      </li>
+      <!-- Account links are injected by js/auth-ui.js — don't add markup here. -->
+      <li id="accountSection"></li>
+    </ul>
+  </nav>
+
+  <h1>Account Settings</h1>
+
+  <p id="guestNotice" style="display: none; text-align: center;">
+    Please <a href="#" id="guestLoginLink">log in</a> to manage your account settings.
+  </p>
+
+  <!--
+    Settings sections are siblings so future ones (reading preferences, profile)
+    drop in without restructuring the page or the script.
+  -->
+  <section id="llmKeysSection" class="settings-section" style="display: none;">
+    <h2>AI provider keys</h2>
+    <p class="settings-note">
+      Bring your own API key to use AI features, such as generating example
+      sentences for your custom vocab. Usage is billed to you by the provider,
+      not by this site. Your key is encrypted before it is stored and is never
+      sent back to your browser — not even to this page.
+      <a href="api-key-setup.html">How do I get a key?</a>
+    </p>
+
+    <label for="activeProviderSelect">
+      Active provider
+      <select id="activeProviderSelect"></select>
+      <small>Which provider AI features will use.</small>
+    </label>
+
+    <div id="providerList"></div>
+
+    <div id="llmKeysError" class="auth-error"></div>
+  </section>
+
+  <script src="js/sidebar-nav.js"></script>
+  <script type="module" src="js/auth-ui.js"></script>
+  <script src="js/account-settings.js"></script>
+</body>
+</html>

@@ -6,3 +6,11 @@ supabase
 .assetsignore
 README.md
 CLAUDE.md
+.mcp.json
+.dev.vars
+.dev.vars.*
+.gitattributes
+dev.cmd
+dev.sh
+stop-dev.cmd
+stop-dev.sh
