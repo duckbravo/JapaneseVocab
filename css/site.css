@@ -109,6 +109,10 @@ tr:hover {
   padding: 6px 12px;
   font-size: 14px;
   transition: background 0.3s ease;
+  /* .play-btn is also used on an <a> (the ✏️ edit link to add-vocab.html) —
+     these two properties keep it looking identical to the <button> uses. */
+  display: inline-block;
+  text-decoration: none;
 }
 
 .play-btn:hover {
@@ -137,6 +141,37 @@ tr:hover {
 
 .audio-player {
   display: none;
+}
+
+/* Stacked examples inside #customVocabTable's Example cell — one word can now
+   have several, mirroring how the verb page's More column stacks phrases. */
+.example-entry {
+  margin-bottom: 0.5em;
+}
+
+.example-entry:last-child {
+  margin-bottom: 0;
+}
+
+.example-entry .example-translation {
+  display: block;
+  font-size: 0.85em;
+  color: #777;
+}
+
+/* #customVocabTable's More cell — up to 2 short phrases, one per line. */
+.more-entry {
+  display: block;
+  margin-bottom: 0.3em;
+}
+
+.more-entry:last-child {
+  margin-bottom: 0;
+}
+
+.more-entry .more-gloss {
+  font-size: 0.85em;
+  color: #777;
 }
 
 #vocabTable td:nth-child(1),
@@ -416,6 +451,58 @@ tr:hover {
 
 .vocab-form-actions #cancelEditBtn:hover {
   background-color: #777;
+}
+
+/* ============================================================
+   add-vocab.html: jisho.org lookup row + AI-generated example cards.
+   Nested inside .vocab-form, so inputs/selects already inherit its rules.
+   ============================================================ */
+
+.jisho-search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.jisho-search-row input {
+  flex: 1;
+}
+
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+}
+
+.example-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background-color: #fafafa;
+}
+
+.example-card .example-japanese,
+.example-card .example-english {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.example-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-self: flex-end;
+}
+
+.example-card-actions button {
+  padding: 4px 10px;
+  font-size: 13px;
 }
 
 /* ============================================================

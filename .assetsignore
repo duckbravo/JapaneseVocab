@@ -14,6 +14,13 @@ dev.cmd
 dev.sh
 stop-dev.cmd
 stop-dev.sh
+# Notebooks are gitignored (*.ipynb) but .gitignore has no effect on what
+# Cloudflare deploys — only .assetsignore does. Without this, a notebook
+# sitting in the repo root (e.g. one containing API keys used during data
+# prep) would be uploaded as a public static asset on `wrangler deploy`,
+# even with zero commits/pushes, since deploy uploads local files directly.
+*.ipynb
+.ipynb_checkpoints
 # Server source, not site assets. Cloudflare bundles worker.js and everything
 # it imports from functions/ at deploy time; only the asset manifest is
 # filtered here, so excluding them does not stop them being compiled.

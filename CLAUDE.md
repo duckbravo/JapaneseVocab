@@ -129,8 +129,9 @@ Shared modules and their responsibilities:
   by cross-referencing starred `user_word_state` rows against both curated
   CSVs (custom words aren't included there yet).
 - `js/account-settings.js` — the bring-your-own-LLM-key UI on
-  `account-settings.html`. Classic script; talks to the Pages Functions in
-  `functions/api/` rather than to Supabase directly. See "Server-side" below.
+  `account-settings.html`. Classic script; talks to the Worker's `/api/*`
+  routes (handlers under `functions/api/`) rather than to Supabase directly.
+  See "Server-side" below.
 
 ### Script loading order matters
 Classic `<script>` tags execute synchronously in document order as the
@@ -165,21 +166,35 @@ scripts, and why `window.supabaseClient` bridging exists at all.
   words (keyed by the same `Kanji || Hiragana` string used for audio
   filenames) and custom words (keyed by `custom_vocab.id`), distinguished
   by `word_type`.
-- There are **separate dev and prod Supabase projects**. The URL/anon key
-  committed in `js/supabase-client.js` point at one of them — check which
-  before assuming, since credentials have changed hands mid-project. The
+- **Currently a single shared Supabase project** (`osckijyshkdlribqmtrk`)
+  backs both local dev and the live site — `.dev.vars` and the committed
+  `js/supabase-client.js` point at the identical URL/anon key. Separate
+  dev/prod projects is the intended eventual state, not the current one, and
+  earlier revisions of this file asserted the split as fact without checking
+  — don't repeat that; verify against `.dev.vars` and `js/supabase-client.js`
+  before assuming either way, since credentials have changed hands
+  mid-project before. Practical consequence of the merge: local testing
+  (throwaway accounts, deleted rows, hammered `custom_vocab` inserts) writes
+  to the exact same data the live site serves — there is currently no
+  isolation. This is a deliberate, known tradeoff (confirmed with the user
+  2026-08-16), not an oversight to fix unprompted — revisit splitting into a
+  real second project once there's real user data worth protecting from
+  local experiments. Until then, a schema migration only needs to be pasted
+  into the SQL Editor once, since dev and prod are the same database. The
   anon/publishable key is intentionally public and safe to commit; RLS is
   the actual access boundary. Never commit a `service_role` key.
   (This bullet used to say LLM API keys "belong in Supabase Edge Function
   secrets only". That predated the per-user BYO-key feature and is no longer
   how it works — user LLM keys live encrypted in Cloudflare KV and the
   encryption secret lives in Cloudflare env vars. See "Server-side" below.)
-- The **dev** project currently has email confirmation disabled
-  (Authentication → Providers → Email) as a deliberate, temporary
-  workaround — free email providers (Gmail/Yahoo/Outlook) can't pass DMARC
-  alignment through third-party SMTP without a verified custom domain, which
-  blocked realistic signup testing. Prod still requires confirmation. Revisit
-  once a domain is available for proper SMTP + domain auth on both.
+- This project currently has email confirmation disabled (Authentication →
+  Providers → Email) as a deliberate, temporary workaround — free email
+  providers (Gmail/Yahoo/Outlook) can't pass DMARC alignment through
+  third-party SMTP without a verified custom domain, which blocked realistic
+  signup testing. Because dev and prod are the same project right now, this
+  also means **the live site currently accepts unconfirmed signups** —
+  relevant before pointing real users at it. Revisit once a domain is
+  available for proper SMTP + domain auth, and/or once the project is split.
 - Google OAuth requires provider setup in the Supabase dashboard plus a
   Google Cloud OAuth client — not something a code change alone can enable.
 

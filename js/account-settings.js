@@ -525,6 +525,43 @@ function setGuestState(isGuest) {
   document.getElementById("guestNotice").style.display = isGuest ? "" : "none";
   // .settings-section is display:flex, so restore it explicitly.
   document.getElementById("llmKeysSection").style.display = isGuest ? "none" : "flex";
+  document.getElementById("vocabPrefsSection").style.display = isGuest ? "none" : "flex";
+}
+
+// ---------------------------------------------------------------------------
+// Vocab preferences (default JLPT level) — persisted straight to Supabase
+// under RLS, same pattern as rows_per_page in js/saved-words.js. No /api/*
+// round trip: there's no secret material here, unlike the LLM keys above.
+// ---------------------------------------------------------------------------
+
+async function loadVocabPrefs() {
+  const { data, error } = await supabaseClient
+    .from("user_preferences")
+    .select("jlpt_level")
+    .eq("user_id", settingsSession.user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load vocab preferences:", error);
+    return;
+  }
+
+  const select = document.getElementById("jlptLevelPref");
+  if (data?.jlpt_level) select.value = data.jlpt_level;
+}
+
+async function saveJlptLevelPref(value) {
+  const msg = document.getElementById("vocabPrefsMsg");
+  const { error } = await supabaseClient
+    .from("user_preferences")
+    .upsert(
+      { user_id: settingsSession.user.id, jlpt_level: value, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" },
+    );
+
+  msg.textContent = error ? "Couldn't save that — try again." : "";
+  msg.classList.toggle("auth-success", !error);
+  if (error) console.error("Failed to save jlpt_level:", error);
 }
 
 document.addEventListener("auth-state-changed", async (e) => {
@@ -541,7 +578,7 @@ document.addEventListener("auth-state-changed", async (e) => {
   if (uid === loadedForUserId) return;
 
   loadedForUserId = uid;
-  await loadSettings();
+  await Promise.all([loadSettings(), loadVocabPrefs()]);
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -551,5 +588,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("activeProviderSelect")?.addEventListener("change", (e) => {
     handleActiveProviderChange(e.target.value);
+  });
+  document.getElementById("jlptLevelPref")?.addEventListener("change", (e) => {
+    saveJlptLevelPref(e.target.value);
   });
 });

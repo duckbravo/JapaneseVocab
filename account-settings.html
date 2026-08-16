@@ -57,6 +57,24 @@
     <div id="llmKeysError" class="auth-error"></div>
   </section>
 
+  <section id="vocabPrefsSection" class="settings-section" style="display: none;">
+    <h2>Vocab preferences</h2>
+
+    <label for="jlptLevelPref">
+      Default JLPT level
+      <select id="jlptLevelPref">
+        <option value="N5">N5 (beginner)</option>
+        <option value="N4">N4</option>
+        <option value="N3">N3</option>
+        <option value="N2">N2</option>
+        <option value="N1">N1 (advanced)</option>
+      </select>
+      <small>Used to pre-select the level when generating AI example sentences on the Add Vocab page. You can still change it per word.</small>
+    </label>
+
+    <div id="vocabPrefsMsg" class="auth-error"></div>
+  </section>
+
   <script src="js/sidebar-nav.js"></script>
   <script type="module" src="js/auth-ui.js"></script>
   <script src="js/account-settings.js"></script>

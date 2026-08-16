@@ -32,58 +32,19 @@
     Please <a href="#" id="guestLoginLink">log in</a> to create and manage your own vocab words.
   </p>
 
-  <form id="customVocabForm" class="vocab-form" style="display: none;">
-    <h2 id="formTitle">Add a word</h2>
-
-    <label for="customHiragana">
-      Hiragana
-      <input type="text" id="customHiragana" required />
-    </label>
-
-    <label for="customKanji">
-      Kanji <small>(optional)</small>
-      <input type="text" id="customKanji" />
-    </label>
-
-    <label for="customEnglish">
-      English
-      <input type="text" id="customEnglish" required />
-    </label>
-
-    <label for="customExample">
-      Example sentence <small>(bracket syntax, e.g. 食べる[たべる]をたべます)</small>
-      <textarea id="customExample" rows="2"></textarea>
-    </label>
-    <div id="examplePreview" class="furigana-preview"></div>
-
-    <label for="customTranslation">
-      Translation
-      <input type="text" id="customTranslation" />
-    </label>
-
-    <label for="customNotes">
-      Notes <small>(optional, same bracket syntax)</small>
-      <textarea id="customNotes" rows="2"></textarea>
-    </label>
-    <div id="notesPreview" class="furigana-preview"></div>
-
-    <div id="formError" class="auth-error"></div>
-
-    <div class="vocab-form-actions">
-      <button type="submit" id="formSubmitBtn">Add</button>
-      <button type="button" id="cancelEditBtn" style="display: none;">Cancel</button>
-    </div>
-  </form>
+  <p id="addVocabLink" style="display: none; text-align: center; margin-bottom: 1em;">
+    <a href="add-vocab.html" class="btn-primary" style="text-decoration: none;">➕ Add a word</a>
+  </p>
 
   <table id="customVocabTable" style="display: none;">
     <thead>
       <tr>
-        <th style="width: 12%;">Hiragana</th>
-        <th style="width: 12%;">Kanji</th>
-        <th style="width: 15%;">English</th>
-        <th style="width: 30%;">Example</th>
-        <th style="width: 16%;">Translation</th>
-        <th style="width: 15%;">Actions</th>
+        <th style="width: 10%;">Hiragana</th>
+        <th style="width: 10%;">Kanji</th>
+        <th style="width: 13%;">English</th>
+        <th style="width: 36%;">Example</th>
+        <th style="width: 19%;">More</th>
+        <th style="width: 12%;">Actions</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -93,6 +54,7 @@
   <script src="js/sidebar-nav.js"></script>
   <script type="module" src="js/auth-ui.js"></script>
   <script src="js/saved-words.js"></script>
+  <script src="js/furigana.js"></script>
   <script src="js/custom-vocab.js"></script>
 </body>
 </html>

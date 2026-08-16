@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Add Vocab</title>
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <div id="sidebarToggle" onclick="toggleSidebar()">☰</div>
+
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar">
+    <ul>
+      <li><a href="index.html">🏠 Home</a></li>
+      <li><a href="index.html">Verbs</a></li>
+      <li>
+        <button class="dropdown-btn">Adjectives ▼</button>
+        <div class="dropdown-content">
+          <a href="i-adjectives.html">i-Adjectives</a>
+          <!-- <a href="naadjectives.html">na-Adjectives</a> -->
+        </div>
+      </li>
+      <!-- Account links are injected by js/auth-ui.js — don't add markup here. -->
+      <li id="accountSection"></li>
+    </ul>
+  </nav>
+
+  <h1 id="pageTitle">Add a word</h1>
+
+  <p id="guestNotice" style="display: none; text-align: center;">
+    Please <a href="#" id="guestLoginLink">log in</a> to create your own vocab words.
+  </p>
+
+  <form id="customVocabForm" class="vocab-form" style="display: none;">
+    <h2 id="formTitle">Look up a word</h2>
+
+    <label for="jishoSearchInput">
+      Search jisho.org <small>(optional — fills in the fields below)</small>
+      <div class="jisho-search-row">
+        <input type="text" id="jishoSearchInput" placeholder="食べる, たべる, to eat…" />
+        <button type="button" id="jishoSearchBtn" class="btn-secondary">🔍 Search</button>
+      </div>
+    </label>
+    <div id="jishoStatus" class="settings-note"></div>
+    <div id="dictFormSuggestion" class="settings-note" style="display: none;"></div>
+
+    <label for="jishoResults" id="jishoResultsLabel" style="display: none;">
+      Select the word you mean
+      <select id="jishoResults"></select>
+    </label>
+    <div id="otherForms" class="settings-note" style="display: none;"></div>
+
+    <h2>Word details</h2>
+
+    <label for="customHiragana">
+      Hiragana
+      <input type="text" id="customHiragana" required />
+    </label>
+
+    <label for="customKanji">
+      Kanji <small>(optional — leave blank for kana-only words)</small>
+      <input type="text" id="customKanji" />
+    </label>
+
+    <label class="checkbox-label" for="kanaOnly">
+      <input type="checkbox" id="kanaOnly" />
+      This word is usually written in kana, not kanji
+    </label>
+    <div id="kanaOnlyHint" class="settings-note" style="display: none;"></div>
+
+    <label for="customEnglish">
+      English
+      <input type="text" id="customEnglish" required />
+    </label>
+
+    <h2>Example sentences</h2>
+    <p class="settings-note">
+      Generated using your own AI provider key (set one up in
+      <a href="account-settings.html">Account Settings</a>), then annotated with
+      furigana automatically. You can edit or remove any sentence, or add your
+      own — keep up to 3; all of them show on the My Vocab table.
+    </p>
+
+    <label for="jlptLevel">
+      JLPT level
+      <select id="jlptLevel">
+        <option value="N5">N5 (beginner)</option>
+        <option value="N4">N4</option>
+        <option value="N3">N3</option>
+        <option value="N2">N2</option>
+        <option value="N1">N1 (advanced)</option>
+      </select>
+    </label>
+
+    <div class="vocab-form-actions">
+      <button type="button" id="generateBtn" class="btn-secondary">✨ Generate examples</button>
+      <button type="button" id="addMoreBtn" class="btn-secondary" style="display: none;">➕ Add more</button>
+      <button type="button" id="addManualBtn" class="btn-secondary">✏️ Add manually</button>
+    </div>
+    <div id="generateStatus" class="settings-note"></div>
+
+    <div id="examplesList"></div>
+
+    <h2>More examples <small>(optional)</small></h2>
+    <p class="settings-note">
+      Two short phrases showing typical usage — e.g. "友達に会います — meet a
+      friend" — rather than full sentences. Mirrors the "More" column on the
+      verb and i-adjective pages. Uses the same JLPT level as above.
+    </p>
+
+    <div class="vocab-form-actions">
+      <button type="button" id="generateMoreBtn" class="btn-secondary">✨ Generate short phrases</button>
+      <button type="button" id="addManualMoreBtn" class="btn-secondary" style="display: none;">✏️ Add manually</button>
+    </div>
+    <div id="generateMoreStatus" class="settings-note"></div>
+
+    <div id="moreList"></div>
+
+    <label for="customNotes">
+      Notes <small>(optional, bracket syntax, e.g. 食べる[たべる]をたべます)</small>
+      <textarea id="customNotes" rows="2"></textarea>
+    </label>
+    <div id="notesPreview" class="furigana-preview"></div>
+
+    <div id="formError" class="auth-error"></div>
+
+    <div class="vocab-form-actions">
+      <button type="submit" id="formSubmitBtn">Add</button>
+      <a href="my-vocab.html" id="cancelEditBtn" class="btn-secondary" style="display: none; text-decoration: none; text-align: center;">Cancel</a>
+    </div>
+  </form>
+
+  <script src="js/sidebar-nav.js"></script>
+  <script type="module" src="js/auth-ui.js"></script>
+  <script src="js/furigana.js"></script>
+  <script src="js/add-vocab.js"></script>
+</body>
+</html>

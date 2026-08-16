@@ -28,6 +28,7 @@ function injectAccountLinks() {
       <span id="accountEmailLabel"></span>
       <a href="my-saved-words.html">⭐ My Saved Words</a>
       <a href="my-vocab.html">📝 My Vocab</a>
+      <a href="add-vocab.html">➕ Add Vocab</a>
       <a href="account-settings.html">⚙️ Account Settings</a>
       <a href="#" id="logoutLink">🚪 Log Out</a>
     </span>

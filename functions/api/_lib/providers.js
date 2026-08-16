@@ -53,6 +53,48 @@ const NETWORK_FAILURE = {
   message: "Couldn't reach PROVIDER (network error or timeout). Try again in a moment.",
 };
 
+/**
+ * Gemini's responseSchema is the older OpenAPI-subset Schema object, not full
+ * JSON Schema — it 400s outright on "additionalProperties" (confirmed against
+ * a live call: 'Unknown name "additionalProperties" at
+ * generation_config.response_schema[...]: Cannot find field.'). The SCHEMA
+ * objects callers pass into generate() are written once and shared with
+ * Anthropic/OpenAI's json_schema formats, which DO require it, so strip it
+ * here for Gemini specifically rather than weakening the shared schema.
+ */
+function toGeminiSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(toGeminiSchema);
+  if (schema && typeof schema === 'object') {
+    const { additionalProperties, ...rest } = schema;
+    for (const key of Object.keys(rest)) {
+      rest[key] = toGeminiSchema(rest[key]);
+    }
+    return rest;
+  }
+  return schema;
+}
+
+/**
+ * generate() failures collapse to a generic 502 for the browser (see
+ * generate-examples.js) — the plaintext invariant means a provider's raw
+ * error body can't just be forwarded to the client, since some APIs echo
+ * request fragments back in error messages. But that leaves zero visibility
+ * server-side into what actually went wrong (bad model id, rejected schema,
+ * quota, refusal...) without this. Safe to log in full: the API key only
+ * ever goes in a header, never in the body, on any of these three APIs.
+ */
+async function logGenerateFailure(providerId, label, res, extra) {
+  let detail = extra ?? '';
+  if (!detail) {
+    try {
+      detail = (await res.text()).slice(0, 500);
+    } catch {
+      /* body unreadable/already consumed — nothing more to log */
+    }
+  }
+  console.error(`[generate:${providerId}] ${label} (HTTP ${res.status}): ${detail}`);
+}
+
 export const PROVIDERS = {
   // ---------------------------------------------------------------------
   // ONE OBJECT LITERAL = ONE PROVIDER
@@ -75,6 +117,20 @@ export const PROVIDERS = {
     minLength: 30,
     maxLength: 300,
     formatHint: 'Google keys start with "AQ." (newer) or "AIza" (legacy).',
+
+    // Cheap, fast, and on the free tier — good enough for a handful of short
+    // example sentences. See generate() below for how this is used.
+    //
+    // gemini-2.5-flash (the original pick here) started erroring out from
+    // under us: Gemini 3 shipped and Google has a track record of pulling
+    // 2.x-series availability ahead of the officially announced retirement
+    // date (see the "deprecated without warning earlier than shutdown date"
+    // reports on the Google AI dev forum). gemini-3.5-flash has been GA since
+    // 2026-05-19 — new enough to not be EOL'd again immediately, old enough
+    // to not carry brand-new-release rollout quirks. Verified Aug 2026
+    // against https://ai.google.dev/pricing that its free tier terms match
+    // the note below.
+    defaultModel: 'gemini-3.5-flash',
 
     // Verified Aug 2026 against https://ai.google.dev/pricing — the Flash
     // family is listed "Free of charge" on the free tier, and the free tier
@@ -140,10 +196,44 @@ export const PROVIDERS = {
       },
     },
 
-    // FUTURE SEAM — not implemented yet. The generation endpoint will call
-    // provider.generate({ apiKey, model, messages, signal }) with the same
-    // shape as validate(), so adding generation is additive, not a refactor.
-    // generate({ apiKey, model, messages, signal }) { ... }
+    // Structured JSON output via Gemini's responseSchema. The key goes in the
+    // same x-goog-api-key header as validate() — never in the URL, so it can't
+    // end up in a proxy log or browser history.
+    async generate({ apiKey, model, systemPrompt, userPrompt, schema, signal }) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: toGeminiSchema(schema),
+          },
+        }),
+        signal,
+      });
+
+      if (!res.ok) {
+        await logGenerateFailure('gemini', 'request rejected', res);
+        return { ok: false, status: res.status };
+      }
+
+      const body = await res.json();
+      const text = body?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (typeof text !== 'string') {
+        await logGenerateFailure('gemini', 'no text in response', res, JSON.stringify(body).slice(0, 500));
+        return { ok: false, status: res.status };
+      }
+
+      try {
+        return { ok: true, data: JSON.parse(text) };
+      } catch {
+        await logGenerateFailure('gemini', 'model output was not valid JSON', res, text.slice(0, 500));
+        return { ok: false, status: res.status };
+      }
+    },
   },
 
   anthropic: {
@@ -157,6 +247,8 @@ export const PROVIDERS = {
     minLength: 40,
     maxLength: 300,
     formatHint: 'Anthropic keys start with "sk-ant-".',
+
+    defaultModel: 'claude-opus-5',
 
     // Anthropic's rate-limit docs list Start/Build/Scale/Custom tiers and no
     // free tier. New Console accounts are widely reported to get a small
@@ -181,6 +273,61 @@ export const PROVIDERS = {
           'Anthropic rejected this key. Check it is still active in the Console and belongs to an organisation with API access.',
       },
     },
+
+    // Structured output via output_config.format (json_schema). Two things
+    // that will 400 if gotten wrong, both intentional here, not oversights:
+    //   - no temperature/top_p/top_k — removed on Claude Opus 5.
+    //   - no `thinking` param — Opus 5 thinks by default, and max_tokens caps
+    //     thinking + response text together, so a generous max_tokens (not a
+    //     disabled-thinking request) is what keeps a short reply from being
+    //     truncated behind it.
+    async generate({ apiKey, model, systemPrompt, userPrompt, schema, signal }) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          // Generous on purpose: Opus 5 thinks by default and max_tokens caps
+          // thinking + response text together, so a tight budget risks
+          // truncating the reply behind thinking tokens for no real saving.
+          max_tokens: 16000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          output_config: { format: { type: 'json_schema', schema } },
+        }),
+        signal,
+      });
+
+      if (!res.ok) {
+        await logGenerateFailure('anthropic', 'request rejected', res);
+        return { ok: false, status: res.status };
+      }
+
+      const body = await res.json();
+      // A safety-classifier decline is a normal 200 with an empty/partial
+      // content array — never index content[0] before checking this.
+      if (body.stop_reason === 'refusal') {
+        console.error('[generate:anthropic] model refused the request');
+        return { ok: false, status: 200 };
+      }
+
+      const text = body?.content?.find((b) => b.type === 'text')?.text;
+      if (typeof text !== 'string') {
+        await logGenerateFailure('anthropic', 'no text block in response', res, JSON.stringify(body).slice(0, 500));
+        return { ok: false, status: res.status };
+      }
+
+      try {
+        return { ok: true, data: JSON.parse(text) };
+      } catch {
+        await logGenerateFailure('anthropic', 'model output was not valid JSON', res, text.slice(0, 500));
+        return { ok: false, status: res.status };
+      }
+    },
   },
 
   openai: {
@@ -196,6 +343,8 @@ export const PROVIDERS = {
     minLength: 40,
     maxLength: 300,
     formatHint: 'OpenAI keys start with "sk-" (often "sk-proj-").',
+
+    defaultModel: 'gpt-4.1-mini',
 
     // OpenAI's pricing page lists no free tier and no starter credits; the
     // only free surfaces are moderation and file-search storage.
@@ -222,6 +371,45 @@ export const PROVIDERS = {
         message:
           'OpenAI is rate-limiting, or the account has no remaining quota. The key itself looks fine — add credit and re-check.',
       },
+    },
+
+    // Structured output via response_format.json_schema (strict mode).
+    async generate({ apiKey, model, systemPrompt, userPrompt, schema, signal }) {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: {
+            type: 'json_schema',
+            json_schema: { name: 'examples', strict: true, schema },
+          },
+        }),
+        signal,
+      });
+
+      if (!res.ok) {
+        await logGenerateFailure('openai', 'request rejected', res);
+        return { ok: false, status: res.status };
+      }
+
+      const body = await res.json();
+      const text = body?.choices?.[0]?.message?.content;
+      if (typeof text !== 'string') {
+        await logGenerateFailure('openai', 'no content in response', res, JSON.stringify(body).slice(0, 500));
+        return { ok: false, status: res.status };
+      }
+
+      try {
+        return { ok: true, data: JSON.parse(text) };
+      } catch {
+        await logGenerateFailure('openai', 'model output was not valid JSON', res, text.slice(0, 500));
+        return { ok: false, status: res.status };
+      }
     },
   },
 };
