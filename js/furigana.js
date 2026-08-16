@@ -52,13 +52,24 @@ function katakanaToHiragana(text) {
 // Tagger
 // ---------------------------------------------------------------------------
 
-// ~12 MB of dictionary, so this is started on demand (first focus of the search
+// ~17 MB of dictionary, so this is started on demand (first focus of the search
 // box) rather than on page load, and the browser caches it after the first
-// visit. Same CDN the site already uses for PapaParse — no repo bloat, no build
-// step.
+// visit. The kuromoji.js SCRIPT itself is still loaded from the CDN (that part
+// is fine) — but the dictionary files are vendored into this repo under
+// /kuromoji-dict/ rather than pointed at the CDN, because kuromoji 0.1.2's own
+// DictionaryLoader builds each file's URL with Node's `path.join(dicPath,
+// filename)` (see its bundled loader/DictionaryLoader.js), and path.join
+// collapses the "//" in "https://cdn.jsdelivr.net/..." down to a single
+// slash. Some browsers silently repair that malformed URL when resolving it;
+// Microsoft Edge does not, and instead requests it as a path on THIS site's
+// own origin (verified live: 404s on
+// https://<this-site>/cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/base.dat.gz).
+// There is no dicPath string containing "//" that survives path.join, so a
+// cross-origin dicPath can never be made reliable — a same-origin absolute
+// path (no "//" in it at all) is the only fix that isn't browser-dependent.
 const KUROMOJI_VERSION = "0.1.2";
 const KUROMOJI_SCRIPT = `https://cdn.jsdelivr.net/npm/kuromoji@${KUROMOJI_VERSION}/build/kuromoji.js`;
-const KUROMOJI_DICT = `https://cdn.jsdelivr.net/npm/kuromoji@${KUROMOJI_VERSION}/dict/`;
+const KUROMOJI_DICT = "/kuromoji-dict/";
 
 let taggerPromise = null;
 
