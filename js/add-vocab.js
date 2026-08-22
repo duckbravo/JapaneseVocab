@@ -1,5 +1,10 @@
-// Add/edit a custom vocab word: jisho.org lookup, AI-generated example
+// Add/edit a custom vocab word: dictionary lookup, AI-generated example
 // sentences, and furigana annotation on save.
+//
+// The lookup talks to GET /api/jisho, which is source-agnostic — it answers
+// from Jotoba (jisho.org is blocked from Cloudflare Workers; see
+// functions/api/jisho.js). Nothing on this page should name a specific
+// dictionary provider in user-visible text.
 //
 // Classic script. Depends on window.supabaseClient (bridged in
 // supabase-client.js) and on js/furigana.js (renderFurigana, getTagger,
@@ -96,7 +101,7 @@ function annotateIfReady(plain) {
 }
 
 // ---------------------------------------------------------------------------
-// jisho.org lookup
+// Dictionary lookup
 // ---------------------------------------------------------------------------
 
 function jishoOptionLabel(entry) {
@@ -172,9 +177,9 @@ function applyJishoEntry(index) {
   setKanaOnly(kanaOnly, form0.word || "");
   setKanaOnlyHint(
     noKanjiForm
-      ? "jisho has no kanji spelling on record for this word."
+      ? "The dictionary has no kanji spelling on record for this word."
       : kanaTagged
-        ? "jisho notes this word is usually written in kana."
+        ? "The dictionary notes this word is usually written in kana."
         : null,
   );
   document.getElementById("customEnglish").value = (entry.senses[0]?.english || []).join(", ");
@@ -227,7 +232,7 @@ async function performJishoSearch() {
   }
 
   btn.disabled = true;
-  status.textContent = "Searching jisho.org…";
+  status.textContent = "Searching the dictionary…";
 
   try {
     const { data } = await api(`/api/jisho?q=${encodeURIComponent(query)}`);
@@ -247,7 +252,7 @@ async function performJishoSearch() {
 
 /**
  * If the query is a single conjugated token the tagger knows, offer its
- * dictionary form — jisho searches work far better on that. Best-effort only:
+ * dictionary form — lookups work far better on that. Best-effort only:
  * silently does nothing if the tagger isn't loaded yet.
  */
 function maybeSuggestDictionaryForm() {

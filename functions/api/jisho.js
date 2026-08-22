@@ -58,13 +58,27 @@ export async function onRequestGet({ request, env, data }) {
     return err(429, 'rate_limited', `Too many lookups — try again in ${retryAfter}s.`);
   }
 
-  // Primary, then fallback. Each returns null on failure (already logged) so a
-  // dead source degrades to the next one instead of failing the request.
-  const jotobaResults = await lookupJotoba(q);
-  if (jotobaResults) return json({ source: 'jotoba', results: jotobaResults });
+  // Each lookup reports { ok } separately from how many results it found.
+  // Keeping those apart is the whole ballgame: "the source answered, and the
+  // answer is that this word isn't in the dictionary" is a NORMAL result the
+  // UI already handles ("No results — you can still add this word manually"),
+  // while "the source is broken" is an outage. Collapsing the two makes every
+  // unmatched word look like the service is down.
+  const jotoba = await lookupJotoba(q);
+  if (jotoba.ok && jotoba.results.length) {
+    return json({ source: 'jotoba', results: jotoba.results });
+  }
 
-  const jishoResults = await lookupJisho(q);
-  if (jishoResults) return json({ source: 'jisho', results: jishoResults });
+  const jisho = await lookupJisho(q);
+  if (jisho.ok && jisho.results.length) {
+    return json({ source: 'jisho', results: jisho.results });
+  }
+
+  // No matches anywhere. If at least one source actually answered, this is a
+  // genuine "no such word", not a failure — 200 with an empty list.
+  if (jotoba.ok || jisho.ok) {
+    return json({ source: jotoba.ok ? 'jotoba' : 'jisho', results: [] });
+  }
 
   return err(
     502,
@@ -74,13 +88,28 @@ export async function onRequestGet({ request, env, data }) {
 }
 
 /**
- * Jotoba's word search. POST + JSON body, so Cloudflare's `cf.cacheTtl*`
- * options don't apply (they're GET/HEAD only) — acceptable, since it answers
- * in well under 100ms from the edge.
+ * Jotoba's word search, with one retry. POST + JSON body, so Cloudflare's
+ * `cf.cacheTtl*` options don't apply (they're GET/HEAD only) — acceptable,
+ * since it answers in well under 100ms from the edge.
  *
- * @returns {Promise<Array|null>} mapped entries, or null if the lookup failed
+ * The retry exists because this shares a Cloudflare egress IP with every other
+ * Worker on the platform, so an occasional throttled or dropped response is
+ * expected; at ~50ms a second attempt is far cheaper than making the user
+ * retype their search.
+ *
+ * @returns {Promise<{ok: boolean, results: Array}>} `ok` says whether the
+ *   source answered at all — which is NOT the same as whether it found
+ *   anything. See the caller.
  */
 async function lookupJotoba(q) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const outcome = await tryJotoba(q, attempt);
+    if (outcome.ok) return outcome;
+  }
+  return { ok: false, results: [] };
+}
+
+async function tryJotoba(q, attempt) {
   let res;
   try {
     res = await fetch('https://jotoba.de/api/search/words', {
@@ -90,31 +119,25 @@ async function lookupJotoba(q) {
       signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
     });
   } catch (e) {
-    console.error('[jisho] jotoba fetch threw', e);
-    return null;
+    console.error(`[jisho] jotoba fetch threw (attempt ${attempt})`, e);
+    return { ok: false, results: [] };
   }
 
   if (!res.ok) {
-    console.error(`[jisho] jotoba returned HTTP ${res.status}`);
-    return null;
+    console.error(`[jisho] jotoba returned HTTP ${res.status} (attempt ${attempt})`);
+    return { ok: false, results: [] };
   }
 
   let body;
   try {
     body = await res.json();
   } catch (e) {
-    console.error('[jisho] jotoba response was not valid JSON', e);
-    return null;
+    console.error(`[jisho] jotoba response was not valid JSON (attempt ${attempt})`, e);
+    return { ok: false, results: [] };
   }
 
   const words = Array.isArray(body?.words) ? body.words : [];
-  // A 200 with zero results is a legitimate "no such word" answer for a real
-  // query, but it's also what a throttled Jotoba returns. Treat empty as a
-  // miss so the jisho fallback still gets a chance; an genuinely unknown word
-  // then just ends up with the same empty list from the fallback.
-  if (words.length === 0) return null;
-
-  return words.slice(0, MAX_RESULTS).map(toJotobaEntry);
+  return { ok: true, results: words.slice(0, MAX_RESULTS).map(toJotobaEntry) };
 }
 
 function toJotobaEntry(word) {
@@ -171,7 +194,8 @@ function miscToTags(misc) {
  * jisho.org's unofficial API — currently blocked from Cloudflare Workers (see
  * the file header), kept as a fallback in case that changes.
  *
- * @returns {Promise<Array|null>} mapped entries, or null if the lookup failed
+ * @returns {Promise<{ok: boolean, results: Array}>} same contract as
+ *   lookupJotoba: `ok` means "answered", not "found something".
  */
 async function lookupJisho(q) {
   let res;
@@ -185,12 +209,12 @@ async function lookupJisho(q) {
     });
   } catch (e) {
     console.error('[jisho] jisho.org fetch threw', e);
-    return null;
+    return { ok: false, results: [] };
   }
 
   if (!res.ok) {
     console.error(`[jisho] jisho.org returned HTTP ${res.status}`);
-    return null;
+    return { ok: false, results: [] };
   }
 
   let body;
@@ -198,11 +222,11 @@ async function lookupJisho(q) {
     body = await res.json();
   } catch (e) {
     console.error('[jisho] jisho.org response was not valid JSON', e);
-    return null;
+    return { ok: false, results: [] };
   }
 
   const entries = Array.isArray(body?.data) ? body.data : [];
-  return entries.slice(0, MAX_RESULTS).map(toJishoEntry);
+  return { ok: true, results: entries.slice(0, MAX_RESULTS).map(toJishoEntry) };
 }
 
 function toJishoEntry(entry) {
