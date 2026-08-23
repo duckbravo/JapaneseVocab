@@ -19,10 +19,21 @@
 let session = null;
 let editingId = null; // custom_vocab.id when ?id= is present, else null
 let jishoResults = []; // raw entries from GET /api/jisho
+let selectedEntryIndex = 0; // which word
+let selectedSenseIndex = 0; // which meaning of that word
 let jishoSlug = null;
 let partOfSpeech = null;
-let examples = []; // [{ plain, english }] — full example sentences
+// Examples are [{ plain, english, furigana }]. `furigana` is normally null and
+// gets produced by the tagger on save — but dictionary-pulled sentences arrive
+// with authoritative furigana already computed, so it's kept and used verbatim
+// (better than re-deriving it, and it works before kuromoji has even loaded).
+// Editing the Japanese text clears it, since it no longer describes the text.
+let examples = [];
 let more = []; // [{ plain, english }] — short "More" usage phrases, capped at 2
+let pitch = []; // [{ part, high }] from the dictionary; [] when unknown
+// Bumped on every sentence pull so a slow response for a meaning the user has
+// already navigated away from can be discarded instead of overwriting.
+let sentenceRequestId = 0;
 let cachedTagger = null; // set once js/furigana.js's tagger has loaded
 
 // ---------------------------------------------------------------------------
@@ -143,15 +154,55 @@ function renderJishoResults() {
   }
 }
 
-// Checked against the FIRST sense only, not "any of up to 5 senses" — that
-// matches the sense whose gloss is actually shown/saved below, and avoids a
-// real jisho.org case (綺麗/きれい): its 2nd/3rd senses carry this tag but
-// its 1st doesn't, and 綺麗 is a normal, commonly kanji-written entry — using
-// .some() across all senses used to auto-clear the kanji field for it, which
-// is exactly the kind of "technically one sense says so" default that feels
-// wrong to a user who just searched a word they see written in kanji daily.
-function isKanaOnlySense(entry) {
-  return entry.senses[0]?.tags.includes("Usually written using kana alone") ?? false;
+// Checked against the SELECTED sense only, never "any sense of this word".
+// A real case that makes the difference concrete (綺麗/きれい): its 2nd and
+// 3rd senses carry this tag but its 1st doesn't, and 綺麗 is a normal,
+// commonly kanji-written word — so a .some() across all senses used to clear
+// the kanji field for it, which is exactly the kind of "well, technically one
+// sense says so" default that feels wrong to someone who just looked up a
+// word they see written in kanji every day.
+function isKanaOnlySense(entry, senseIndex) {
+  return entry.senses[senseIndex]?.tags.includes("Usually written using kana alone") ?? false;
+}
+
+/** "1. to eat" / "2. to live on (e.g. a salary), to live off" */
+function senseOptionLabel(sense, i) {
+  const gloss = sense.english.join(", ");
+  const pos = sense.partsOfSpeech[0];
+  return `${i + 1}. ${gloss}${pos ? ` — ${pos}` : ""}`;
+}
+
+/** Every meaning's glosses, in dictionary order: "to eat; to live on, to live off". */
+function allGlosses(entry) {
+  return entry.senses.map((s) => s.english.join(", ")).filter(Boolean).join("; ");
+}
+
+// Defaults to ALL meanings. The example sentences can't be tied to a single
+// sense (see functions/api/sentences.js), so recording every meaning is what
+// keeps the entry consistent with the sentences attached to it. Narrowing to
+// one meaning stays available for anyone who wants a single-sense card.
+const ALL_SENSES = "all";
+
+function renderSenseOptions(entry) {
+  const select = document.getElementById("senseSelect");
+  const label = document.getElementById("senseSelectLabel");
+  select.textContent = "";
+
+  const all = document.createElement("option");
+  all.value = ALL_SENSES;
+  all.textContent = `All meanings — ${allGlosses(entry)}`;
+  select.appendChild(all);
+
+  entry.senses.forEach((sense, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = senseOptionLabel(sense, i);
+    select.appendChild(opt);
+  });
+
+  select.value = ALL_SENSES;
+  // With one meaning, "all" and "that one" are the same thing — no choice to make.
+  label.style.display = entry.senses.length > 1 ? "" : "none";
 }
 
 /** Explains an auto-set kanji checkbox so it doesn't look like it came from nowhere. */
@@ -161,31 +212,20 @@ function setKanaOnlyHint(reason) {
   hint.style.display = reason ? "" : "none";
 }
 
+/** Picking an entry = choosing the WORD. Everything meaning-specific is in applySense(). */
 function applyJishoEntry(index) {
   const entry = jishoResults[index];
   if (!entry) return;
 
+  selectedEntryIndex = index;
+
   const form0 = entry.forms[0] || {};
-  const noKanjiForm = !form0.word;
-  const kanaTagged = isKanaOnlySense(entry);
-  const kanaOnly = noKanjiForm || kanaTagged;
-
   document.getElementById("customHiragana").value = form0.reading || "";
-  // Fill the kanji box even when defaulting to "usually kana" — the box's
-  // content and the checkbox are independent (see setKanaOnly/effectiveKanji
-  // below), so the user can just untick to use it instead of retyping it.
-  setKanaOnly(kanaOnly, form0.word || "");
-  setKanaOnlyHint(
-    noKanjiForm
-      ? "The dictionary has no kanji spelling on record for this word."
-      : kanaTagged
-        ? "The dictionary notes this word is usually written in kana."
-        : null,
-  );
-  document.getElementById("customEnglish").value = (entry.senses[0]?.english || []).join(", ");
-
   jishoSlug = entry.slug;
-  partOfSpeech = entry.senses[0]?.partsOfSpeech[0] || null;
+
+  pitch = Array.isArray(entry.pitch) ? entry.pitch : [];
+  setPitch(document.getElementById("pitchDisplay"), pitch);
+  document.getElementById("pitchRow").style.display = pitch.length ? "" : "none";
 
   const otherForms = entry.forms.slice(1).filter((f) => f.word);
   const otherFormsEl = document.getElementById("otherForms");
@@ -196,6 +236,66 @@ function applyJishoEntry(index) {
   } else {
     otherFormsEl.style.display = "none";
   }
+
+  renderSenseOptions(entry);
+  applySense(ALL_SENSES);
+
+  // Sentences belong to the WORD, not to a meaning — they can't be filtered by
+  // sense (see functions/api/sentences.js), so they're fetched once per entry
+  // and left alone when the meaning selection changes. Sweep out the previous
+  // word's pulls first so there's room; anything generated, typed or edited by
+  // hand is the user's and stays.
+  examples = examples.filter((ex) => ex.source !== "dictionary");
+  renderExamples();
+
+  // Fire-and-forget: the rest of the form is already filled in and usable, and
+  // a slow corpus shouldn't hold up the selection.
+  pullDictionarySentences(form0.word || form0.reading || "");
+}
+
+/**
+ * Picking which meaning(s) to record. Drives the English stored, the part of
+ * speech, and the kana-only default. It deliberately does NOT touch the
+ * example sentences: those aren't sense-linked, so re-pulling them per meaning
+ * would only churn the list without making it any more relevant.
+ *
+ * @param {number|"all"} senseIndex
+ */
+function applySense(senseIndex) {
+  const entry = jishoResults[selectedEntryIndex];
+  if (!entry) return;
+
+  const isAll = senseIndex === ALL_SENSES;
+  const sense = isAll ? entry.senses[0] : entry.senses[senseIndex];
+  if (!sense) return;
+
+  selectedSenseIndex = senseIndex;
+
+  const form0 = entry.forms[0] || {};
+  const noKanjiForm = !form0.word;
+  // For "all meanings" this follows the PRIMARY sense: a word whose first and
+  // most common meaning is normally written in kanji shouldn't have the kanji
+  // cleared just because some later sense is usually kana (綺麗 is the case
+  // that makes this concrete — see isKanaOnlySense).
+  const kanaTagged = isKanaOnlySense(entry, isAll ? 0 : senseIndex);
+  const kanaOnly = noKanjiForm || kanaTagged;
+
+  // Fill the kanji box even when defaulting to "usually kana" — the box's
+  // content and the checkbox are independent (see setKanaOnly/effectiveKanji
+  // below), so the user can just untick to use it instead of retyping it.
+  setKanaOnly(kanaOnly, form0.word || "");
+  setKanaOnlyHint(
+    noKanjiForm
+      ? "The dictionary has no kanji spelling on record for this word."
+      : kanaTagged
+        ? `The dictionary notes ${isAll ? "this word is" : "this meaning is"} usually written in kana.`
+        : null,
+  );
+
+  document.getElementById("customEnglish").value = isAll
+    ? allGlosses(entry)
+    : sense.english.join(", ");
+  partOfSpeech = sense.partsOfSpeech[0] || null;
 }
 
 // checked/disabled are about whether kanji is CURRENTLY IN USE; the input's
@@ -303,11 +403,18 @@ function maybeSuggestDictionaryForm() {
 // limit are the same number by design, not two caps that happen to agree.
 const MAX_EXAMPLES = 3;
 
-function refreshExampleFurigana(card, plain) {
+/**
+ * @param {HTMLElement} card
+ * @param {string} plain the sentence as typed/pulled
+ * @param {string|null} ready pre-computed bracket furigana, when the source
+ *   supplied it (dictionary sentences do). Skips the tagger entirely, so these
+ *   render correctly even before kuromoji's dictionary has finished loading.
+ */
+function refreshExampleFurigana(card, plain, ready) {
   const preview = card.querySelector(".example-furigana-preview");
-  const annotated = annotateIfReady(plain);
+  const annotated = ready || annotateIfReady(plain);
   preview.innerHTML = "";
-  if (annotated !== null) {
+  if (annotated) {
     preview.appendChild(renderFurigana(annotated));
   } else if (plain) {
     // Loaded-but-failed-on-this-text and never-going-to-load both just show
@@ -316,10 +423,62 @@ function refreshExampleFurigana(card, plain) {
   }
 }
 
+/**
+ * Pulls real sentences for `word` into the example boxes. Only fills EMPTY
+ * slots up to MAX_EXAMPLES, so anything the user already typed, generated, or
+ * edited is never clobbered by a late-arriving response.
+ *
+ * Sentences are NOT restricted to one meaning — the corpus doesn't record
+ * which sense a sentence demonstrates, and guessing from the English
+ * translation biased the results badly (it silently dropped every past-tense
+ * sentence, since "ate" doesn't look like "eat"). See
+ * functions/api/sentences.js.
+ */
+async function pullDictionarySentences(word) {
+  if (!word || examples.length >= MAX_EXAMPLES) return;
+
+  // A late response for a word the user has already navigated away from must
+  // not land in the boxes.
+  const requestId = ++sentenceRequestId;
+
+  const status = document.getElementById("generateStatus");
+  status.textContent = "Looking for example sentences…";
+
+  let pulled = [];
+  try {
+    const { data } = await api(`/api/sentences?q=${encodeURIComponent(word)}`);
+    pulled = Array.isArray(data.sentences) ? data.sentences : [];
+  } catch {
+    // Sentences are a bonus, not a requirement — stay silent and let the user
+    // generate or type their own.
+    if (requestId === sentenceRequestId) status.textContent = "";
+    return;
+  }
+
+  if (requestId !== sentenceRequestId) return; // superseded
+
+  const room = MAX_EXAMPLES - examples.length;
+  if (room <= 0 || pulled.length === 0) {
+    status.textContent = pulled.length === 0 ? "No ready-made sentences for this word — try Generate." : "";
+    return;
+  }
+
+  examples = examples.concat(
+    pulled.slice(0, room).map((s) => ({
+      plain: s.japanese,
+      english: s.english || "",
+      furigana: s.furigana || null,
+      source: "dictionary",
+    })),
+  );
+  renderExamples();
+  status.textContent = "";
+}
+
 /** Updates every card's preview in place, without rebuilding the inputs. */
 function refreshAllExamplePreviews() {
   document.querySelectorAll("#examplesList .example-card").forEach((card, i) => {
-    refreshExampleFurigana(card, examples[i]?.plain || "");
+    refreshExampleFurigana(card, examples[i]?.plain || "", examples[i]?.furigana);
   });
 }
 
@@ -330,7 +489,7 @@ function updateExampleCard(index) {
   if (!card || !ex) return;
   card.querySelector(".example-japanese").value = ex.plain;
   card.querySelector(".example-english").value = ex.english;
-  refreshExampleFurigana(card, ex.plain);
+  refreshExampleFurigana(card, ex.plain, ex.furigana);
 }
 
 /**
@@ -342,7 +501,6 @@ function updateExampleCard(index) {
  */
 function setExamplesBusy(busy) {
   document.getElementById("generateBtn").disabled = busy;
-  document.getElementById("addMoreBtn").disabled = busy;
   document.getElementById("addManualBtn").disabled = busy;
   document.querySelectorAll("#examplesList button").forEach((btn) => {
     btn.disabled = busy;
@@ -394,7 +552,13 @@ function renderExamples() {
 
     japaneseInput.addEventListener("input", () => {
       examples[i].plain = japaneseInput.value;
-      refreshExampleFurigana(card, japaneseInput.value);
+      // Any pre-computed furigana described the ORIGINAL text, so it's wrong
+      // the moment the text changes — drop it and fall back to the tagger.
+      examples[i].furigana = null;
+      // Once you've edited it, it's yours: it stops being a swept-away
+      // dictionary pull if you later switch to a different meaning.
+      examples[i].source = "manual";
+      refreshExampleFurigana(card, japaneseInput.value, null);
     });
     englishInput.addEventListener("input", () => {
       examples[i].english = englishInput.value;
@@ -402,16 +566,26 @@ function renderExamples() {
 
     card.append(japaneseInput, preview, englishInput, actions);
     list.appendChild(card);
-    refreshExampleFurigana(card, ex.plain);
+    refreshExampleFurigana(card, ex.plain, ex.furigana);
   });
 
-  document.getElementById("addMoreBtn").style.display =
-    examples.length > 0 && examples.length < MAX_EXAMPLES ? "" : "none";
-  document.getElementById("generateBtn").textContent =
-    examples.length > 0 ? "🔄 Regenerate all" : "✨ Generate examples";
+  // Generate tops up rather than replacing, so it's only useful with room left.
+  const room = MAX_EXAMPLES - examples.length;
+  const generateBtn = document.getElementById("generateBtn");
+  generateBtn.style.display = room > 0 ? "" : "none";
+  generateBtn.textContent =
+    examples.length > 0 ? `✨ Generate ${room} more with AI` : "✨ Generate examples";
+  document.getElementById("addManualBtn").style.display = room > 0 ? "" : "none";
 }
 
-async function generateExamples(mode) {
+/**
+ * Tops the example list up to MAX_EXAMPLES with AI-written sentences. Always
+ * ADDITIVE — never replaces what's already there, because by the time this
+ * runs the list usually holds real dictionary sentences that were pulled in
+ * automatically, and wiping those would defeat the point. Replacing one
+ * specific example is what each card's 🔄 button does.
+ */
+async function generateExamples() {
   const hiragana = document.getElementById("customHiragana").value.trim();
   const kanji = effectiveKanji();
   const english = document.getElementById("customEnglish").value.trim();
@@ -423,14 +597,14 @@ async function generateExamples(mode) {
     return;
   }
 
-  const count = mode === "more" ? Math.min(2, MAX_EXAMPLES - examples.length) : 3;
+  const count = MAX_EXAMPLES - examples.length;
   if (count <= 0) return;
 
-  warmUpTagger(); // examples need furigana on save; make sure it's loading
+  warmUpTagger(); // AI sentences have no furigana of their own; the tagger supplies it
 
-  // "More" keeps the existing batch, so tell the model what's already there —
-  // otherwise it has no way to know and happily returns near-repeats.
-  const avoid = mode === "more" ? examples.map((ex) => ex.plain).filter(Boolean) : [];
+  // Tell the model what's already in the list — including the pulled
+  // dictionary sentences — or it has no way to avoid near-duplicates.
+  const avoid = examples.map((ex) => ex.plain).filter(Boolean);
 
   setExamplesBusy(true);
   status.textContent = "Generating example sentences…";
@@ -441,9 +615,13 @@ async function generateExamples(mode) {
       body: { hiragana, kanji, english, jlptLevel, count, avoid },
     });
 
-    const generated = (data.examples || []).map((ex) => ({ plain: ex.japanese, english: ex.english }));
-    if (mode === "more") examples = examples.concat(generated);
-    else examples = generated;
+    const generated = (data.examples || []).map((ex) => ({
+      plain: ex.japanese,
+      english: ex.english,
+      furigana: null, // AI text has none; annotated by the tagger on save
+      source: "ai", // survives a change of meaning; only "dictionary" is swept
+    }));
+    examples = examples.concat(generated).slice(0, MAX_EXAMPLES);
 
     renderExamples();
     status.textContent = generated.length
@@ -493,7 +671,16 @@ async function regenerateSingleExample(index) {
       return;
     }
 
-    examples[index] = { plain: replacement.japanese, english: replacement.english };
+    // furigana: null — this is fresh AI text, so any furigana the replaced
+    // (possibly dictionary-pulled) example carried no longer applies. It stops
+    // being a "dictionary" example too, so a later change of meaning leaves it
+    // alone.
+    examples[index] = {
+      plain: replacement.japanese,
+      english: replacement.english,
+      furigana: null,
+      source: "ai",
+    };
     updateExampleCard(index);
     status.textContent = "";
   } catch (e) {
@@ -504,7 +691,8 @@ async function regenerateSingleExample(index) {
 }
 
 function addManualExample() {
-  examples.push({ plain: "", english: "" });
+  if (examples.length >= MAX_EXAMPLES) return;
+  examples.push({ plain: "", english: "", furigana: null, source: "manual" });
   renderExamples();
   const cards = document.querySelectorAll("#examplesList .example-card textarea");
   cards[cards.length - 1]?.focus();
@@ -526,7 +714,7 @@ const MAX_MORE = 2;
 /** Updates every "More" card's preview in place, without rebuilding the inputs. */
 function refreshAllMorePreviews() {
   document.querySelectorAll("#moreList .example-card").forEach((card, i) => {
-    refreshExampleFurigana(card, more[i]?.plain || "");
+    refreshExampleFurigana(card, more[i]?.plain || "", more[i]?.furigana);
   });
 }
 
@@ -537,7 +725,7 @@ function updateMoreCard(index) {
   if (!card || !ex) return;
   card.querySelector(".example-japanese").value = ex.plain;
   card.querySelector(".example-english").value = ex.english;
-  refreshExampleFurigana(card, ex.plain);
+  refreshExampleFurigana(card, ex.plain, ex.furigana);
 }
 
 /** Same reasoning as setExamplesBusy — locks out concurrent mutation of `more`. */
@@ -594,7 +782,8 @@ function renderMore() {
 
     japaneseInput.addEventListener("input", () => {
       more[i].plain = japaneseInput.value;
-      refreshExampleFurigana(card, japaneseInput.value);
+      more[i].furigana = null; // stored furigana no longer matches the text
+      refreshExampleFurigana(card, japaneseInput.value, null);
     });
     englishInput.addEventListener("input", () => {
       more[i].english = englishInput.value;
@@ -602,7 +791,7 @@ function renderMore() {
 
     card.append(japaneseInput, preview, englishInput, actions);
     list.appendChild(card);
-    refreshExampleFurigana(card, ex.plain);
+    refreshExampleFurigana(card, ex.plain, ex.furigana);
   });
 
   document.getElementById("addManualMoreBtn").style.display = more.length < MAX_MORE ? "" : "none";
@@ -634,7 +823,11 @@ async function generateMorePhrases() {
       body: { hiragana, kanji, english, jlptLevel, style: "phrase" },
     });
 
-    more = (data.examples || []).map((ex) => ({ plain: ex.japanese, english: ex.english }));
+    more = (data.examples || []).map((ex) => ({
+      plain: ex.japanese,
+      english: ex.english,
+      furigana: null, // AI text; the tagger annotates it on save
+    }));
     renderMore();
     status.textContent = more.length
       ? ""
@@ -682,7 +875,7 @@ async function regenerateSingleMorePhrase(index) {
       return;
     }
 
-    more[index] = { plain: replacement.japanese, english: replacement.english };
+    more[index] = { plain: replacement.japanese, english: replacement.english, furigana: null };
     updateMoreCard(index);
     status.textContent = "";
   } catch (e) {
@@ -694,7 +887,7 @@ async function regenerateSingleMorePhrase(index) {
 
 function addManualMorePhrase() {
   if (more.length >= MAX_MORE) return;
-  more.push({ plain: "", english: "" });
+  more.push({ plain: "", english: "", furigana: null });
   renderMore();
   const cards = document.querySelectorAll("#moreList .example-card textarea");
   cards[cards.length - 1]?.focus();
@@ -730,15 +923,25 @@ async function loadJlptPreference() {
 // Edit mode
 // ---------------------------------------------------------------------------
 
+// Stored rows already hold correct bracket furigana, so keep it rather than
+// re-deriving it — that way opening a word for editing needs no tagger, and
+// re-saving without touching a sentence can't quietly change its readings.
 function examplesFromRow(row) {
   if (Array.isArray(row.examples) && row.examples.length) {
     return row.examples.map((e) => ({
       plain: furiganaToPlain(e.furigana || ""),
       english: e.translation || "",
+      furigana: e.furigana || null,
     }));
   }
   if (row.example_furigana) {
-    return [{ plain: furiganaToPlain(row.example_furigana), english: row.translation || "" }];
+    return [
+      {
+        plain: furiganaToPlain(row.example_furigana),
+        english: row.translation || "",
+        furigana: row.example_furigana,
+      },
+    ];
   }
   return [];
 }
@@ -748,6 +951,7 @@ function moreFromRow(row) {
   return row.more.map((e) => ({
     plain: furiganaToPlain(e.furigana || ""),
     english: e.translation || "",
+    furigana: e.furigana || null,
   }));
 }
 
@@ -772,6 +976,9 @@ async function loadForEdit(id) {
 
   examples = examplesFromRow(row);
   more = moreFromRow(row);
+  pitch = Array.isArray(row.pitch) ? row.pitch : [];
+  setPitch(document.getElementById("pitchDisplay"), pitch);
+  document.getElementById("pitchRow").style.display = pitch.length ? "" : "none";
   renderExamples();
   renderMore();
   updateNotesPreview();
@@ -787,6 +994,16 @@ async function loadForEdit(id) {
 
 /** Shared by both `examples` and `more` — same {plain, english} shape either way. */
 async function annotateForSave(list) {
+  // Anything that already carries authoritative furigana (dictionary-pulled
+  // sentences) needs no tagger at all, so don't pay for loading one unless
+  // something in the list actually requires it.
+  const needsTagger = list.some((ex) => ex.plain.trim() && !ex.furigana);
+  if (!needsTagger) {
+    return list
+      .filter((ex) => ex.plain.trim())
+      .map((ex) => ({ furigana: ex.furigana, translation: ex.english.trim() }));
+  }
+
   // Save waits for the tagger rather than accepting "best effort" here — the
   // whole point of this page is that the user shouldn't have to hand-type
   // brackets, so silently storing plain text on a slow network would be a
@@ -839,6 +1056,7 @@ async function handleFormSubmit(e) {
       english: document.getElementById("customEnglish").value.trim(),
       examples: storedExamples,
       more: storedMore,
+      pitch,
       example_furigana: first.furigana || null,
       translation: first.translation || null,
       notes_furigana: document.getElementById("customNotes").value.trim() || null,
@@ -896,8 +1114,17 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("jishoSearchBtn").addEventListener("click", performJishoSearch);
   document.getElementById("jishoResults").addEventListener("change", (e) => {
-    if (e.target.value !== "manual") applyJishoEntry(Number(e.target.value));
-    else setKanaOnlyHint(null); // no jisho entry backing the form anymore
+    if (e.target.value !== "manual") {
+      applyJishoEntry(Number(e.target.value));
+    } else {
+      // No dictionary entry backing the form anymore.
+      setKanaOnlyHint(null);
+      document.getElementById("senseSelectLabel").style.display = "none";
+    }
+  });
+
+  document.getElementById("senseSelect").addEventListener("change", (e) => {
+    applySense(e.target.value === ALL_SENSES ? ALL_SENSES : Number(e.target.value));
   });
 
   document.getElementById("kanaOnly").addEventListener("change", (e) => {
@@ -905,8 +1132,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setKanaOnlyHint(null); // the user just overrode whatever jisho suggested
   });
 
-  document.getElementById("generateBtn").addEventListener("click", () => generateExamples("replace"));
-  document.getElementById("addMoreBtn").addEventListener("click", () => generateExamples("more"));
+  document.getElementById("generateBtn").addEventListener("click", generateExamples);
   document.getElementById("addManualBtn").addEventListener("click", addManualExample);
 
   document.getElementById("generateMoreBtn").addEventListener("click", generateMorePhrases);

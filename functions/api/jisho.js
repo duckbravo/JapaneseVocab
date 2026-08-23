@@ -151,6 +151,7 @@ function toJotobaEntry(word) {
     // renders this as an optional badge, so an empty list just omits it.
     jlpt: [],
     forms: [{ word: kanji, reading: kana }],
+    pitch: toPitch(word?.pitch),
     senses: Array.isArray(word?.senses)
       ? word.senses.slice(0, MAX_SENSES).map((s) => ({
           english: Array.isArray(s?.glosses) ? s.glosses.filter((g) => typeof g === 'string') : [],
@@ -161,6 +162,24 @@ function toJotobaEntry(word) {
         }))
       : [],
   };
+}
+
+/**
+ * Pitch accent (高低アクセント), as an ordered list of runs — Jotoba has
+ * already merged consecutive same-level morae, so `[{part:"た",high:false},
+ * {part:"べ",high:true},{part:"る",high:false}]` means たべる is LHL (accent
+ * type 2). Verified correct against standard NHK accents for 食べる/走る/
+ * 嬉しい/ある/綺麗.
+ *
+ * Allowlisted like everything else here: only `part` (string) and `high`
+ * (coerced boolean) survive, so nothing unreviewed from a third party reaches
+ * the browser or the database.
+ */
+function toPitch(pitch) {
+  if (!Array.isArray(pitch)) return [];
+  return pitch
+    .filter((p) => p && typeof p.part === 'string')
+    .map((p) => ({ part: p.part, high: p.high === true }));
 }
 
 /**
@@ -234,6 +253,9 @@ function toJishoEntry(entry) {
     slug: typeof entry?.slug === 'string' ? entry.slug : null,
     isCommon: entry?.is_common === true,
     jlpt: Array.isArray(entry?.jlpt) ? entry.jlpt.filter((j) => typeof j === 'string') : [],
+    // jisho.org's API carries no pitch data — keep the key so both sources
+    // hand the client an identical shape.
+    pitch: [],
     forms: Array.isArray(entry?.japanese)
       ? entry.japanese.map((f) => ({
           word: typeof f?.word === 'string' ? f.word : null,

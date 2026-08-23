@@ -50,6 +50,20 @@
       Select the word you mean
       <select id="jishoResults"></select>
     </label>
+
+    <!--
+      A single dictionary entry often has several distinct meanings (食べる is
+      both "to eat" and "to live on (a salary)"). This picks which of them the
+      card records. It defaults to ALL of them, because the example sentences
+      below can't be tied to one meaning — recording every meaning is what
+      keeps the card honest about what its sentences show. Hidden when the word
+      only has one meaning anyway.
+    -->
+    <label for="senseSelect" id="senseSelectLabel" style="display: none;">
+      Which meaning to record?
+      <select id="senseSelect"></select>
+      <small>Sentences below show the word in general use, not one specific meaning.</small>
+    </label>
     <div id="otherForms" class="settings-note" style="display: none;"></div>
 
     <h2>Word details</h2>
@@ -75,12 +89,18 @@
       <input type="text" id="customEnglish" required />
     </label>
 
+    <!-- Pitch accent from the dictionary; hidden when there's none on record. -->
+    <div id="pitchRow" class="settings-note" style="display: none;">
+      Pitch accent: <span id="pitchDisplay"></span>
+    </div>
+
     <h2>Example sentences</h2>
     <p class="settings-note">
-      Generated using your own AI provider key (set one up in
-      <a href="account-settings.html">Account Settings</a>), then annotated with
-      furigana automatically. You can edit or remove any sentence, or add your
-      own — keep up to 3; all of them show on the My Vocab table.
+      Real sentences from the dictionary are pulled in automatically when you
+      pick a word above. Use <strong>Generate</strong> to top up to 3 with
+      AI-written sentences at your JLPT level (needs an AI key — set one up in
+      <a href="account-settings.html">Account Settings</a>). Edit, remove or
+      regenerate any of them; all of them show on the My Vocab table.
     </p>
 
     <label for="jlptLevel">
@@ -94,9 +114,13 @@
       </select>
     </label>
 
+    <!--
+      "Generate" TOPS UP to 3 rather than replacing: the dictionary sentences
+      pulled in automatically must survive it. Replacing an individual one is
+      what each card's own 🔄 button is for.
+    -->
     <div class="vocab-form-actions">
       <button type="button" id="generateBtn" class="btn-secondary">✨ Generate examples</button>
-      <button type="button" id="addMoreBtn" class="btn-secondary" style="display: none;">➕ Add more</button>
       <button type="button" id="addManualBtn" class="btn-secondary">✏️ Add manually</button>
     </div>
     <div id="generateStatus" class="settings-note"></div>

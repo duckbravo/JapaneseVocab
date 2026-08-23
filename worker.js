@@ -27,6 +27,7 @@ import * as llmKeys from './functions/api/llm-keys/index.js';
 import * as llmKeysValidate from './functions/api/llm-keys/validate.js';
 import * as llmKeysActive from './functions/api/llm-keys/active.js';
 import * as jisho from './functions/api/jisho.js';
+import * as sentences from './functions/api/sentences.js';
 import * as generateExamples from './functions/api/generate-examples.js';
 
 // ADD NEW ENDPOINTS HERE.
@@ -36,6 +37,7 @@ const ROUTES = {
   '/api/llm-keys/validate': llmKeysValidate,
   '/api/llm-keys/active': llmKeysActive,
   '/api/jisho': jisho,
+  '/api/sentences': sentences,
   '/api/generate-examples': generateExamples,
 };
 

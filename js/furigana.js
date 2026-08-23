@@ -343,3 +343,52 @@ function setFurigana(el, text) {
   el.innerHTML = "";
   el.appendChild(renderFurigana(text));
 }
+
+// ---------------------------------------------------------------------------
+// Pitch accent
+// ---------------------------------------------------------------------------
+
+/**
+ * Pitch accent (高低アクセント) -> DocumentFragment, drawn in the standard
+ * line notation: a bar over the high morae, under the low ones, with a drop
+ * mark where high falls to low.
+ *
+ * Input is the dictionary's own shape, `[{ part: "た", high: false }, ...]`,
+ * where consecutive same-level morae are ALREADY merged into one part — so
+ * this just walks the runs, it doesn't need to work out the accent type.
+ *
+ *   たべる  ->  た(low) べ(high) る(low)   = accent 2
+ *
+ * Same XSS boundary as renderFurigana(): built with createElement/textContent
+ * only, never innerHTML, because this reaches the DOM from stored user rows.
+ */
+function renderPitch(pitch) {
+  const fragment = document.createDocumentFragment();
+  if (!Array.isArray(pitch) || pitch.length === 0) return fragment;
+
+  const wrap = document.createElement("span");
+  wrap.className = "pitch";
+
+  pitch.forEach((entry, i) => {
+    if (!entry || typeof entry.part !== "string") return;
+    const span = document.createElement("span");
+    // The drop is what actually defines the accent, so mark the last high
+    // mora before a low one rather than leaving the reader to infer it.
+    const dropsAfter = entry.high === true && pitch[i + 1]?.high === false;
+    span.className = `pitch-${entry.high === true ? "high" : "low"}${dropsAfter ? " pitch-drop" : ""}`;
+    span.textContent = entry.part;
+    wrap.appendChild(span);
+  });
+
+  fragment.appendChild(wrap);
+  return fragment;
+}
+
+/** Convenience: replace an element's contents with a rendered pitch line. */
+function setPitch(el, pitch) {
+  if (!el) return;
+  el.innerHTML = "";
+  const hasPitch = Array.isArray(pitch) && pitch.length > 0;
+  el.style.display = hasPitch ? "" : "none";
+  if (hasPitch) el.appendChild(renderPitch(pitch));
+}

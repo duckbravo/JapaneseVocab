@@ -159,6 +159,38 @@ tr:hover {
   color: #777;
 }
 
+/* Pitch accent (高低アクセント), drawn in the standard line notation: a bar
+   over the high morae, under the low ones, and a vertical tick at the drop.
+   Built by renderPitch() in js/furigana.js. */
+.pitch {
+  display: inline-flex;
+  white-space: nowrap;
+  font-size: 1em;
+  line-height: 1.9;
+}
+
+.pitch-high,
+.pitch-low {
+  padding: 0 1px;
+}
+
+.pitch-high {
+  border-top: 2px solid #c0392b;
+}
+
+.pitch-low {
+  border-bottom: 2px solid #999;
+}
+
+/* The downstep is what actually defines the accent type, so mark it. */
+.pitch-drop {
+  border-right: 2px solid #c0392b;
+}
+
+.pitch-line {
+  margin-top: 0.25em;
+}
+
 /* #customVocabTable's More cell — up to 2 short phrases, one per line. */
 .more-entry {
   display: block;

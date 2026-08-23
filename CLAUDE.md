@@ -239,6 +239,20 @@ source-agnostic; both mappers are allowlist projections, and Jotoba's
 `"Usually written using kana alone"` because the client keys the kana-only
 checkbox off that string.
 
+**Don't filter corpus example sentences by dictionary sense.** It has been
+tried and reverted. Jotoba's sentence objects carry no sense link, so the only
+lever is matching the sense's English glosses against each sentence's
+translation — which filters on English *surface form* and therefore silently
+drops every irregular inflection ("I already ate." fails the gloss "to eat")
+and every paraphrase. Systematically hiding past-tense examples from a learner
+is worse than occasionally showing another sense of the word. `/api/sentences`
+returns them unfiltered, and `add-vocab.html` defaults to recording **all** of
+a word's meanings so the card matches the sentences attached to it. Real
+sense-linked data does exist if this is ever worth doing properly: the Tanaka
+Corpus (`examples.utf.gz`, ~9.7MB) annotates each indexed word with its JMdict
+sense and conjugated form — `会う[01]{会えない}` — but that means vendoring and
+indexing a corpus, not adding a filter.
+
 **Never pair `cf: { cacheTtl }` with `cacheEverything` on a third-party
 fetch.** That combination caches *error* responses for the full TTL too, so a
 single transient 502 becomes a day of failures for that query at that colo.

@@ -123,6 +123,15 @@ function renderCustomVocabTable(rows) {
     const hiraganaCell = document.createElement("td");
     hiraganaCell.setAttribute("data-label", "Hiragana");
     hiraganaCell.textContent = row.hiragana;
+    // Pitch accent under the reading, where it belongs — it describes how the
+    // reading is said. Renders nothing at all when the word has no pitch data
+    // (manually added words, or ones the dictionary didn't know).
+    if (Array.isArray(row.pitch) && row.pitch.length) {
+      const pitchLine = document.createElement("div");
+      pitchLine.className = "pitch-line";
+      pitchLine.appendChild(renderPitch(row.pitch));
+      hiraganaCell.appendChild(pitchLine);
+    }
     tr.appendChild(hiraganaCell);
 
     const kanjiCell = document.createElement("td");
