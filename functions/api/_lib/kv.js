@@ -9,6 +9,7 @@
 //       gemini: {
 //         cipher:          { v, iv, ct },   // NEVER leaves this file
 //         hint:            'AIzaSy…9xQ2',
+//         model:           'gemini-3.5-flash-lite' | null,
 //         keyLength:       39,
 //         status:          'valid' | 'invalid' | 'unknown',
 //         statusDetail:    'API_KEY_INVALID' | null,
@@ -34,6 +35,10 @@ const PREFIX = 'llm-keys:';
 // leak any field added later.
 const PUBLIC_RECORD_FIELDS = [
   'hint',
+  // Which model this provider should use for this user, or null to follow the
+  // registry's default. A model id is public information, not a secret — and
+  // the Account Settings picker can't show the current selection without it.
+  'model',
   'keyLength',
   'status',
   'statusDetail',

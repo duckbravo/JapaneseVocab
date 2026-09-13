@@ -128,6 +128,20 @@ Shared modules and their responsibilities:
 - `js/my-saved-words.js` — populates the cross-source "My Saved Words" page
   by cross-referencing starred `user_word_state` rows against both curated
   CSVs (custom words aren't included there yet).
+- `js/add-vocab.js` — the add/edit form on `add-vocab.html`, structured as a
+  **three-step wizard**: (1) find the word + pick its meaning, (2) choose how
+  the example sentences get written, (3) review and save. The steps are
+  `<section class="wizard-step">` blocks inside one `<form>`, shown one at a
+  time by `goToStep()`, which only toggles `hidden` — it never rebuilds markup,
+  so an in-flight generation, a half-typed sentence and the tagger's loading
+  state all survive navigation between steps. Every exit from step 2 and step 3
+  goes through the single `saveWord()` writer, which is **idempotent**: after a
+  successful insert it adopts the new id as `editingId`, so a step-2 choice
+  that fails *after* saving (a missing AI key) leaves the user free to pick a
+  different option without creating a duplicate word. `?id=` (edit) opens
+  straight on step 3. `#jlptLevel` (step 2) and `#jlptLevelReview` (step 3) are
+  one setting mirrored into two controls — edit mode never shows step 2 and the
+  fast paths never show step 3, so neither alone serves every flow.
 - `js/account-settings.js` — the bring-your-own-LLM-key UI on
   `account-settings.html`. Classic script; talks to the Worker's `/api/*`
   routes (handlers under `functions/api/`) rather than to Supabase directly.
@@ -209,14 +223,17 @@ worker.js             THE ENTRY POINT — routes /api/*, hands everything else t
 wrangler.jsonc        name/main/assets/KV binding/compatibility_date
 functions/api/
   _middleware.js      auth + no-store for every /api/* request
-  _lib/               helpers — http, auth, crypto, kv, providers, keys, ratelimit
+  _lib/               helpers — http, auth, crypto, kv, providers, keys, ratelimit,
+                      examples, prompts, models, supabase-rest
   llm-providers.js    GET  /api/llm-providers
   jisho.js            GET  /api/jisho          — dictionary lookup (Add Vocab)
-  generate-examples.js POST /api/generate-examples — AI example sentences
+  generate-examples.js POST /api/generate-examples — AI example sentences (foreground)
+  queue-examples.js   POST /api/queue-examples — same, in the background (202 + waitUntil)
   llm-keys/
     index.js          GET | POST | DELETE  /api/llm-keys
     validate.js       POST /api/llm-keys/validate
     active.js         POST /api/llm-keys/active
+    model.js          POST /api/llm-keys/model   — pick which model a key uses
 ```
 
 **jisho.org is unreachable from Cloudflare Workers — do not "fix" the
@@ -253,6 +270,84 @@ Corpus (`examples.utf.gz`, ~9.7MB) annotates each indexed word with its JMdict
 sense and conjugated form — `会う[01]{会えない}` — but that means vendoring and
 indexing a corpus, not adding a filter.
 
+**Background example generation writes to Supabase from the Worker — as the
+user, never with a `service_role` key.** `POST /api/queue-examples` answers
+`202` and finishes generating inside `ctx.waitUntil()`, because the whole point
+is that the browser navigates away (a `fetch()` dies with its page;
+`keepalive: true` preserves the request but discards the response, so the only
+place a result can land is the database). `_lib/supabase-rest.js` PATCHes the
+row by forwarding the same bearer token the browser sent, so RLS is still the
+access boundary — a bug there cannot reach another user's rows because Postgres
+refuses, not because the code remembered a filter. Three rules hold this
+together:
+- **Save the row before requesting generation.** `custom_vocab.example_status`
+  goes `pending` at insert time. Worst case is then a saved word with no
+  sentences (visible and retryable on My Vocab), not a word that vanished
+  because a provider was down.
+- **Every exit path writes a terminal status.** A row stuck on `pending`
+  forever is the one failure the user can neither see nor act on. Client-side
+  failures to even start the job (`no_key`, `rate_limited`) flip the row to
+  `failed` from the browser; server-side ones do it from `waitUntil`.
+- **The Worker cannot produce furigana.** kuromoji is a ~12MB browser-only
+  dictionary, so generated sentences are stored as plain Japanese with
+  `needs_furigana = true`. `js/custom-vocab.js` annotates those rows with the
+  tagger it already loads and writes the bracket syntax back, then clears the
+  flag. Anything editing such a row must **drop** the stored `furigana` first
+  (`loadForEdit` does) — `annotateForSave()` skips entries that already carry
+  furigana, so keeping it would save un-annotated text as authoritative and
+  lose the ruby permanently.
+
+**Every LLM prompt lives in `functions/api/_lib/prompts.js` — put new ones
+there, not inline.** It's plain data (template strings with `{placeholders}`,
+filled by its own `render()`), so wording can be tuned without reading
+assembly code. `_lib/examples.js` decides only which pieces apply; the schema
+and sanitizer stay there. Both the foreground and background routes assemble
+from the same templates, so the "review it yourself" and "trust it" paths can
+never drift into producing different sentences for the same word.
+
+Two conventions in that file are load-bearing:
+- **Optional clauses are passed in pre-rendered** (`{avoidClause}`,
+  `{amendmentSection}`, `{reading}`), which is why there are no conditionals
+  in the templates.
+- **Constraints are restated AFTER the user's own text** in
+  `amendmentSection`, and numbered. That section carries the per-sentence
+  "how should this change?" note from the review step — **the only untrusted
+  text in any prompt**. Don't move the rules above it: later instructions
+  carry more weight. `normalizeInstruction()` flattens control characters and
+  newlines, neutralises quotes that could close the quotation it sits in, and
+  caps it at 200 characters.
+
+None of that is the security boundary. `sanitizeExamples()` re-checks every
+returned sentence independently, so a model that obeys an injection wholesale
+still can't store anything — verified: a reply of `"PWNED"` is rejected as
+`not_japanese`. Keep the sanitizer as the thing that actually holds.
+
+**`english` is a gloss LIST, not a word — don't size its limits like one.** The
+Add Vocab form defaults to recording every sense of an entry, so an ordinary
+word serialises long: 屋台 has five senses and 255 characters. It was sharing
+the 100-character cap meant for hiragana/kanji, which rejected such words with
+*"That field is too long"* — an error about a field the user never typed into.
+`MAX_ENGLISH_LENGTH` (600) is now separate, because that cap exists to keep
+pathological input out of the sanitizer's regexes and `english` never reaches
+them. Conversely the PROMPT gets only the primary sense (`promptGloss()`, first
+`"; "` segment): the card should be honest about covering every meaning, but a
+model told 屋台 means "cart; festival float; stage prop; framework; house"
+scatters its sentences across all five.
+
+**`containsTargetWord()` is a "did the model ignore us entirely" guard, not a
+grammar check — keep it loose.** It has been too strict twice, and both times
+the symptom was the same unhelpful error, *"…returned no usable examples"*,
+on output that was actually fine. Requiring the dictionary form as a literal
+substring rejected every conjugation; requiring *every* kanji of the word then
+rejected every sentence where the model spelled the word in kana (たべます for
+食べる, きれい for 綺麗, できます for 出来る) or only partly in kanji
+(もって行きます for 持って行く) — four of six realistic cases in testing. It now
+accepts the kana reading's stem **or** any one kanji from the word. A
+too-permissive filter costs one odd example the user can regenerate in a tap;
+a too-strict one takes down the whole request. When this error is reported,
+read the `rejections=` tally in the Worker log before changing anything — it
+names which of the filters fired and how often.
+
 **Never pair `cf: { cacheTtl }` with `cacheEverything` on a third-party
 fetch.** That combination caches *error* responses for the full TTL too, so a
 single transient 502 becomes a day of failures for that query at that colo.
@@ -286,12 +381,48 @@ nothing imports them as routes.
   otherwise 401. Conversely, `auth-ui.js` re-dispatches on `TOKEN_REFRESHED`,
   so page loaders must guard on `user.id` to avoid refetching hourly.
 
+**Model choice here is a QUOTA decision, not a capability one.** Writing three
+short Japanese sentences against a fixed JSON schema does not distinguish
+frontier models from small ones, so the registry defaults to the cheapest
+model with the largest allowance on each provider — `gemini-3.5-flash-lite`,
+`claude-haiku-4-5-20251001`, `gpt-4.1-mini`. This matters most on Google's free
+tier: as of 2026-09 free-tier Flash is reported at ~20 requests/day (cut from
+250) while Flash-Lite is ~500, and a backgrounded word costs TWO calls, so the
+previous `gemini-3.5-flash` default ran out after about ten words a day.
+
+**Google no longer publishes per-model free-tier limits.**
+`https://ai.google.dev/gemini-api/docs/rate-limits` now says limits "can be
+viewed in Google AI Studio" and links `https://aistudio.google.com/rate-limit`.
+The numbers above come from the developer forum, not documentation — treat them
+as indicative, check your own AI Studio dashboard for the real figures, and
+don't "correct" the code from memory of an older docs table.
+
+`functions/api/_lib/models.js` keeps that decision from going stale:
+- Each registry entry carries `models: [{id, label, note}]` — a **preference
+  order**, cheapest/highest-quota first — plus an optional `listModels()`.
+- On a **429 (quota) or 404 (model retired)** the generation walks to the next
+  model in the chain. Any other status fails immediately, since a bad key or a
+  provider outage will fail identically on every model.
+- The provider's live catalogue is cached in KV under `models:<providerId>` and
+  refreshed opportunistically when older than 24h — traffic-driven, not a Cron
+  Trigger, because discovery needs an API key and keys are per-user and
+  encrypted, so a scheduled job has no credentials to check with. A stale cache
+  is served immediately and refreshed under `waitUntil`.
+- `knownModels()` returns **null**, never `[]`, when discovery fails — null
+  means "no opinion" and leaves the chain unfiltered. An empty array would be
+  indistinguishable from "the provider offers nothing" and would take
+  generation down on a transient listing error.
+- Users can override the model per provider (`POST /api/llm-keys/model`, stored
+  as `model` on the KV record). The server re-checks the id against the registry
+  because it gets interpolated into a provider URL.
+
 **Two hard conventions:**
 1. **The registry rule.** Adding an LLM provider = one object literal in
    `functions/api/_lib/providers.js` plus one `<h2 id="…">` section in
    `api-key-setup.html` matching its `docsAnchor`. Format hints, live
-   validation calls, and error messages all derive from that entry. If you're
-   writing `if (provider === 'gemini')` anywhere else, that's a bug.
+   validation calls, model chains, and error messages all derive from that
+   entry. If you're writing `if (provider === 'gemini')` anywhere else, that's
+   a bug.
 2. **The plaintext invariant.** No endpoint returns a decrypted key.
    `_lib/kv.js` `toPublic()` builds every response body from an **allowlist**
    (never by deleting `cipher` from a spread), and `decryptSecret()` has

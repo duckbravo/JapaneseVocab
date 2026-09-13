@@ -182,8 +182,14 @@ tr:hover {
   border-bottom: 2px solid #999;
 }
 
-/* The downstep is what actually defines the accent type, so mark it. */
-.pitch-drop {
+/* The two vertical connectors. Each is a right border on the mora before the
+   transition; because every mora is a flex item of the same height, that
+   border runs from the top line down to the bottom line and joins them.
+   Both are drawn in the high colour so the red marks the whole high plateau
+   including its two edges — a connector in the low grey would look like a
+   seam where the two horizontal runs failed to meet. */
+.pitch-drop,
+.pitch-rise {
   border-right: 2px solid #c0392b;
 }
 
@@ -768,5 +774,381 @@ button:disabled:hover {
 
   .doc-page {
     padding: 1.25rem;
+  }
+}
+
+/* ============================================================
+   Add Vocab wizard (add-vocab.html)
+   ============================================================
+   The form is one <form> whose <section class="wizard-step"> blocks are shown
+   one at a time by js/add-vocab.js. Everything here is layout for that — the
+   inputs themselves still inherit the .vocab-form rules above. */
+
+.vocab-wizard {
+  gap: 1rem;
+}
+
+/* Step indicator. It's a real <ol> so it reads as an ordered list of steps
+   without CSS, and the numbers come from a counter rather than markup. */
+.wizard-progress {
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  counter-reset: wizard-step;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.wizard-progress li {
+  flex: 1;
+  counter-increment: wizard-step;
+}
+
+.wizard-progress-btn {
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 4px;
+  background: none;
+  border: none;
+  border-top: 3px solid #e0e0e0;
+  color: #999;
+  text-align: left;
+}
+
+.wizard-progress-btn::before {
+  content: counter(wizard-step) ". ";
+}
+
+.wizard-progress .is-current .wizard-progress-btn {
+  border-top-color: #007bff;
+  color: #007bff;
+  font-weight: bold;
+}
+
+.wizard-progress .is-done .wizard-progress-btn {
+  border-top-color: #7ab8ff;
+  color: #555;
+}
+
+.wizard-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* REQUIRED, not tidiness. goToStep() hides steps with the `hidden` attribute,
+   which works via the browser's UA rule [hidden] { display: none } — and an
+   author-level `display: flex` above beats any UA rule, whatever its
+   specificity. Without this line every step renders at once and the wizard is
+   just the old long form with extra headings. */
+.wizard-step[hidden] {
+  display: none;
+}
+
+.wizard-step > h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.wizard-step > h3 {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+}
+
+/* Collapsed sections ("Word details", "Optional extras"). */
+.wizard-details {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.wizard-details[open] {
+  padding-bottom: 0.75rem;
+}
+
+.wizard-details > summary {
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 14px;
+  /* The whole row is the hit target, which matters far more on a phone than
+     the 12px triangle browsers give you by default. */
+  padding: 0.25rem 0;
+}
+
+.wizard-details[open] > summary {
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.wizard-summary-value {
+  font-weight: normal;
+  color: #777;
+}
+
+.wizard-details > *:not(summary) {
+  margin-top: 0.5rem;
+}
+
+/* The three ways out of step 2. */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  background: white;
+  border: 2px solid #d8d8d8;
+  border-radius: 8px;
+}
+
+.choice-card:hover:not(:disabled),
+.choice-card:focus-visible {
+  border-color: #007bff;
+  background: #f5faff;
+}
+
+.choice-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.choice-title {
+  font-weight: bold;
+  font-size: 15px;
+}
+
+.choice-desc {
+  font-size: 13px;
+  color: #444;
+}
+
+.choice-meta {
+  font-size: 12px;
+  color: #888;
+}
+
+.wizard-inline-field {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  flex-wrap: wrap;
+}
+
+.wizard-inline-field select {
+  flex: 0 1 auto;
+}
+
+.wizard-nav {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+/* The primary action sits last and takes the remaining width, so on a phone
+   the thumb lands on "continue" rather than on "cancel". */
+.wizard-nav .btn-primary,
+.wizard-nav [type="submit"] {
+  flex: 1;
+  order: 2;
+}
+
+.wizard-nav .btn-secondary,
+.wizard-nav .wizard-back-link {
+  order: 1;
+  flex: 0 0 auto;
+  text-decoration: none;
+  text-align: center;
+}
+
+.wizard-nav button,
+.wizard-nav .wizard-back-link {
+  padding: 10px 14px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .vocab-wizard {
+    padding: 1rem;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .wizard-progress-btn {
+    font-size: 11px;
+    /* Three labels have to fit one phone row; hiding the text entirely would
+       lose the only cue about what comes next. */
+    padding: 6px 2px;
+  }
+
+  .wizard-nav button,
+  .wizard-nav .wizard-back-link {
+    /* Comfortably above the ~44px minimum touch target. */
+    padding: 12px 14px;
+  }
+}
+
+/* ============================================================
+   Background generation state (my-vocab.html)
+   ============================================================
+   A custom_vocab row whose examples are being written by the Worker, or whose
+   generation failed. See js/custom-vocab.js. */
+
+.gen-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  font-size: 13px;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+}
+
+.gen-state-pending {
+  color: #6a5300;
+  background: #fff8e6;
+  border-left: 3px solid #f5a623;
+}
+
+.gen-state-failed {
+  color: #8a1f1f;
+  background: #fdecec;
+  border-left: 3px solid #d64545;
+}
+
+.gen-state-label {
+  font-weight: bold;
+}
+
+.gen-state-reason {
+  color: #6b4444;
+  font-size: 12px;
+}
+
+.gen-state-retry {
+  margin-top: 0.15rem;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Deliberately subtle: a pending row is still a real, saved word and its
+   hiragana/kanji/English are all correct — only the Example cell is waiting. */
+.row-pending td {
+  opacity: 0.85;
+}
+
+/* Per-example tuning row on the Add Vocab review step: this sentence's own
+   JLPT level, and a free-text note describing how it should be rewritten.
+   Sits between the English field and the card's buttons. */
+.example-tune {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.example-tune .example-level {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: bold;
+  color: #666;
+}
+
+.example-tune .example-level-select {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+/* Takes the remaining width, but never narrower than a readable box — below
+   that the flex row wraps it onto its own line instead. */
+.example-tune .example-instruction {
+  flex: 1 1 14rem;
+  min-width: 0;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 768px) {
+  .example-tune {
+    /* Two full-width rows beats a cramped side-by-side on a phone. */
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .example-tune .example-level {
+    justify-content: space-between;
+  }
+
+  /* REQUIRED once the container becomes a column. flex-basis applies along the
+     MAIN axis, so the `flex: 1 1 14rem` above — meant as "14rem wide" in the
+     row layout — turns into "14rem TALL" here, rendering the note box as a
+     giant empty rectangle. */
+  .example-tune .example-instruction {
+    flex: 0 0 auto;
+  }
+}
+
+/* Model picker inside a provider row on account-settings.html. On a free tier
+   the model choice is mostly a quota choice, so the note underneath carries
+   request-per-day guidance rather than capability claims. */
+.provider-row-model {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0.5rem 0;
+}
+
+.provider-row-model label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 13px;
+  font-weight: bold;
+  color: #555;
+}
+
+.provider-row-model select {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-weight: normal;
+  /* Takes the width left over from the label, but wraps rather than shrinking
+     below something readable. */
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .provider-row-model label {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  /* flex-basis follows the main axis, which is now vertical — without this the
+     select renders 12rem TALL. */
+  .provider-row-model select {
+    flex: 0 0 auto;
   }
 }

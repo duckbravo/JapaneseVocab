@@ -37,6 +37,13 @@
     <a href="add-vocab.html" class="btn-primary" style="text-decoration: none;">➕ Add a word</a>
   </p>
 
+  <!-- Shown while any row is still example_status='pending'; hidden again by
+       js/custom-vocab.js as soon as the last one lands. -->
+  <p id="generatingNotice" class="settings-note" style="display: none; text-align: center;">
+    ✨ Some words are still having their example sentences written. You can
+    leave this page — they'll be here when you come back.
+  </p>
+
   <table id="customVocabTable" style="display: none;">
     <thead>
       <tr>

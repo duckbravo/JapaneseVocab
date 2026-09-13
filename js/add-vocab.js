@@ -34,7 +34,30 @@ let pitch = []; // [{ part, high }] from the dictionary; [] when unknown
 // Bumped on every sentence pull so a slow response for a meaning the user has
 // already navigated away from can be discarded instead of overwriting.
 let sentenceRequestId = 0;
+// What the corpus offered for the CURRENT word, kept separately from
+// `examples` (the editor's contents) because the two answer different
+// questions. `examples` is destroyed and rebuilt as the user moves around —
+// notably chooseReview() clears the pulled sentences to make room for AI ones
+// — whereas step 2's first card needs to know what the dictionary had for this
+// word regardless of what's since happened in the editor. Deriving the card's
+// state from `examples` made going to the review step and back permanently
+// disable it.
+let dictionarySentences = [];
 let cachedTagger = null; // set once js/furigana.js's tagger has loaded
+
+// Which of the three wizard screens is showing. Purely presentational — no
+// piece of state above is owned by a step, which is what lets edit mode open
+// directly on step 3 with everything already populated.
+let currentStep = 1;
+// Whether a /api/sentences round trip is outstanding. Step 2's first choice
+// can't describe itself honestly while one is — "Use the dictionary's
+// sentences" has to say how many there are.
+//
+// Starts TRUE (nothing is in flight yet), which is what a word typed by hand
+// needs: no lookup ever runs for it, so a false start would leave the card
+// stuck on "Looking for sentences…" permanently instead of saying plainly that
+// the dictionary has none.
+let sentencePullSettled = true;
 
 // ---------------------------------------------------------------------------
 // Server communication — same shape as js/account-settings.js's api()
@@ -67,6 +90,110 @@ async function api(path, { method = "GET", body } = {}) {
     throw new Error(data.message || `Request failed (${res.status}).`);
   }
   return { status: res.status, data };
+}
+
+// ---------------------------------------------------------------------------
+// Wizard navigation
+// ---------------------------------------------------------------------------
+//
+// The three <section class="wizard-step"> blocks in add-vocab.html are shown
+// one at a time. This only toggles `hidden` — it never builds or destroys
+// markup, so an in-flight generation, a half-typed sentence and the tagger's
+// loading state all survive moving between steps.
+
+/** Everything step 2 and 3 need before they mean anything. */
+function wordIsUsable() {
+  return (
+    document.getElementById("customHiragana").value.trim() !== "" &&
+    document.getElementById("customEnglish").value.trim() !== ""
+  );
+}
+
+/**
+ * Shows one step. Steps past 1 refuse to open without a usable word, so the
+ * progress bar can't be used to skip the only genuinely required fields.
+ */
+function goToStep(step, { force = false } = {}) {
+  if (step > 1 && !force && !wordIsUsable()) {
+    document.getElementById("step1Error").textContent =
+      "Fill in the hiragana and English for this word first.";
+    document.getElementById("wordDetails").open = true;
+    return false;
+  }
+
+  currentStep = step;
+  document.querySelectorAll(".wizard-step").forEach((section) => {
+    section.hidden = Number(section.dataset.step) !== step;
+  });
+  updateProgress();
+  updateWordDetailsSummary();
+
+  // Each step is a fresh screen, not a scroll position within the old one.
+  window.scrollTo({ top: 0, behavior: "auto" });
+  return true;
+}
+
+function updateProgress() {
+  document.querySelectorAll("#wizardProgress li").forEach((li) => {
+    const step = Number(li.dataset.step);
+    li.classList.toggle("is-current", step === currentStep);
+    li.classList.toggle("is-done", step < currentStep);
+  });
+}
+
+/**
+ * The collapsed "Word details" summary has to show what's inside it, or
+ * collapsing it just hides whether the search actually filled anything in.
+ */
+function updateWordDetailsSummary() {
+  const hiragana = document.getElementById("customHiragana").value.trim();
+  const english = document.getElementById("customEnglish").value.trim();
+  const kanji = effectiveKanji();
+  const el = document.getElementById("wordDetailsSummary");
+  if (!hiragana && !english) {
+    el.textContent = "— not filled in yet";
+    return;
+  }
+  const headword = kanji ? `${kanji}（${hiragana}）` : hiragana;
+  // Long "all meanings" glosses would push the summary onto three lines.
+  const gloss = english.length > 40 ? `${english.slice(0, 40)}…` : english;
+  el.textContent = `— ${headword} · ${gloss}`;
+}
+
+/**
+ * #jlptLevel (step 2) and #jlptLevelReview (step 3's extras) are one setting
+ * shown in two places — edit mode never displays step 2, and the fast paths
+ * never display step 3, so neither control alone can serve every flow. Ids
+ * must be unique, so they're mirrored instead.
+ */
+function syncJlptControls(from) {
+  const a = document.getElementById("jlptLevel");
+  const b = document.getElementById("jlptLevelReview");
+  if (from === "review") a.value = b.value;
+  else b.value = a.value;
+  refreshExampleLevels();
+}
+
+/**
+ * Re-points every example card that hasn't been individually overridden at the
+ * new page-wide level.
+ *
+ * Cards store `level` only once the user touches their own dropdown, so
+ * "undefined" genuinely means "follow the default" rather than "was created
+ * under N5". Without this, changing the review step's level would visibly do
+ * nothing to the cards already on screen, which reads as the control being
+ * broken.
+ */
+function refreshExampleLevels() {
+  document.querySelectorAll("#examplesList .example-card").forEach((card, i) => {
+    if (examples[i]?.level) return; // explicitly overridden — leave it alone
+    const select = card.querySelector(".example-level-select");
+    if (select) select.value = jlptLevel();
+  });
+}
+
+function jlptLevel() {
+  return document.getElementById("jlptLevel").value;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +373,7 @@ function applyJishoEntry(index) {
   // word's pulls first so there's room; anything generated, typed or edited by
   // hand is the user's and stays.
   examples = examples.filter((ex) => ex.source !== "dictionary");
+  dictionarySentences = []; // belongs to the previous word
   renderExamples();
 
   // Fire-and-forget: the rest of the form is already filled in and usable, and
@@ -296,6 +424,11 @@ function applySense(senseIndex) {
     ? allGlosses(entry)
     : sense.english.join(", ");
   partOfSpeech = sense.partsOfSpeech[0] || null;
+
+  // The fields this just wrote are behind a collapsed <details>, so the
+  // summary line is the only evidence the user has that anything happened.
+  updateWordDetailsSummary();
+  document.getElementById("step1Error").textContent = "";
 }
 
 // checked/disabled are about whether kanji is CURRENTLY IN USE; the input's
@@ -403,6 +536,13 @@ function maybeSuggestDictionaryForm() {
 // limit are the same number by design, not two caps that happen to agree.
 const MAX_EXAMPLES = 3;
 
+// Mirrors JLPT_LEVELS in functions/api/_lib/examples.js, which is the actual
+// allowlist — anything else is clamped to N5 server-side. Duplicated rather
+// than fetched because there's no build step to share a constant across the
+// browser/Worker boundary, and a five-item list that hasn't changed since the
+// JLPT was reorganised in 2010 isn't worth a round trip.
+const JLPT_LEVELS = ["N5", "N4", "N3", "N2", "N1"];
+
 /**
  * @param {HTMLElement} card
  * @param {string} plain the sentence as typed/pulled
@@ -441,6 +581,9 @@ async function pullDictionarySentences(word) {
   // not land in the boxes.
   const requestId = ++sentenceRequestId;
 
+  sentencePullSettled = false;
+  updateDictionaryChoice();
+
   const status = document.getElementById("generateStatus");
   status.textContent = "Looking for example sentences…";
 
@@ -451,28 +594,75 @@ async function pullDictionarySentences(word) {
   } catch {
     // Sentences are a bonus, not a requirement — stay silent and let the user
     // generate or type their own.
-    if (requestId === sentenceRequestId) status.textContent = "";
+    if (requestId === sentenceRequestId) {
+      status.textContent = "";
+      sentencePullSettled = true;
+      updateDictionaryChoice();
+    }
     return;
   }
 
   if (requestId !== sentenceRequestId) return; // superseded
 
+  sentencePullSettled = true;
+
   const room = MAX_EXAMPLES - examples.length;
   if (room <= 0 || pulled.length === 0) {
     status.textContent = pulled.length === 0 ? "No ready-made sentences for this word — try Generate." : "";
+    updateDictionaryChoice();
     return;
   }
 
-  examples = examples.concat(
-    pulled.slice(0, room).map((s) => ({
-      plain: s.japanese,
-      english: s.english || "",
-      furigana: s.furigana || null,
-      source: "dictionary",
-    })),
-  );
+  dictionarySentences = pulled.slice(0, room).map((s) => ({
+    plain: s.japanese,
+    english: s.english || "",
+    furigana: s.furigana || null,
+    source: "dictionary",
+  }));
+
+  // Copies, so editing one in the form doesn't mutate the stash the "use the
+  // dictionary's sentences" card would restore.
+  examples = examples.concat(dictionarySentences.map((s) => ({ ...s })));
   renderExamples();
+  updateDictionaryChoice();
   status.textContent = "";
+}
+
+/** How many sentences the dictionary had for this word — see dictionarySentences. */
+function dictionaryExampleCount() {
+  return dictionarySentences.length;
+}
+
+/**
+ * Keeps step 2's first choice honest about what taking it would actually
+ * save. A card reading "Use the dictionary's sentences" that quietly saves
+ * zero of them is worse than no card at all, so with nothing pulled it
+ * disables itself and says so.
+ */
+function updateDictionaryChoice() {
+  const card = document.getElementById("choiceDictionary");
+  const desc = document.getElementById("choiceDictionaryDesc");
+  if (!card || !desc) return;
+
+  const count = dictionaryExampleCount();
+
+  if (!sentencePullSettled) {
+    desc.textContent = "Looking for real sentences from the dictionary…";
+    card.disabled = true;
+    return;
+  }
+
+  if (count === 0) {
+    desc.textContent = "The dictionary has no ready-made sentences for this word.";
+    card.disabled = true;
+    return;
+  }
+
+  desc.textContent =
+    count === 1
+      ? "1 real sentence, written by a human and already checked."
+      : `${count} real sentences, written by humans and already checked.`;
+  card.disabled = false;
 }
 
 /** Updates every card's preview in place, without rebuilding the inputs. */
@@ -530,11 +720,57 @@ function renderExamples() {
     englishInput.placeholder = "English translation";
     englishInput.value = ex.english;
 
+    // --- per-example tuning -------------------------------------------
+    // Both controls belong to THIS card. They exist because the two things a
+    // learner wants to change about one sentence are how hard it is and what
+    // it's about, and neither is worth rerolling the whole batch for.
+    const tune = document.createElement("div");
+    tune.className = "example-tune";
+
+    const levelLabel = document.createElement("label");
+    levelLabel.className = "example-level";
+    levelLabel.append("Level");
+    const levelSelect = document.createElement("select");
+    levelSelect.className = "example-level-select";
+    JLPT_LEVELS.forEach((lv) => {
+      const opt = document.createElement("option");
+      opt.value = lv;
+      opt.textContent = lv;
+      levelSelect.appendChild(opt);
+    });
+    // ex.level is undefined until the user overrides it, so a card that's been
+    // left alone follows the review step's level rather than freezing whatever
+    // it was created under.
+    levelSelect.value = ex.level || jlptLevel();
+    levelSelect.addEventListener("change", () => {
+      examples[i].level = levelSelect.value;
+    });
+    levelLabel.appendChild(levelSelect);
+
+    const instructionInput = document.createElement("input");
+    instructionInput.type = "text";
+    instructionInput.className = "example-instruction";
+    instructionInput.placeholder = "How should this change? e.g. about food, more polite, shorter";
+    instructionInput.value = ex.instruction || "";
+    instructionInput.addEventListener("input", () => {
+      examples[i].instruction = instructionInput.value;
+    });
+    // Enter in a single-line input inside a <form> would submit the form and
+    // save the word; here it should do the obvious thing instead.
+    instructionInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        regenerateSingleExample(i);
+      }
+    });
+
+    tune.append(levelLabel, instructionInput);
+
     const regenerateBtn = document.createElement("button");
     regenerateBtn.type = "button";
     regenerateBtn.className = "btn-secondary";
-    regenerateBtn.textContent = "🔄 Regenerate";
-    regenerateBtn.title = "Replace just this example";
+    regenerateBtn.textContent = "🔄 Rewrite";
+    regenerateBtn.title = "Replace just this example, using the level and note above";
     regenerateBtn.addEventListener("click", () => regenerateSingleExample(i));
 
     const removeBtn = document.createElement("button");
@@ -564,7 +800,7 @@ function renderExamples() {
       examples[i].english = englishInput.value;
     });
 
-    card.append(japaneseInput, preview, englishInput, actions);
+    card.append(japaneseInput, preview, englishInput, tune, actions);
     list.appendChild(card);
     refreshExampleFurigana(card, ex.plain, ex.furigana);
   });
@@ -634,12 +870,23 @@ async function generateExamples() {
   }
 }
 
-/** Replaces a single example in place, keeping the rest of the batch untouched. */
+/**
+ * Replaces a single example in place, keeping the rest of the batch untouched.
+ *
+ * Uses THIS card's level and amendment note rather than the page-wide ones —
+ * that's the whole point of the per-card controls. The note is passed as
+ * `instruction`; the server treats it as untrusted text and restates its hard
+ * rules after it (see functions/api/_lib/prompts.js), and sanitizeExamples()
+ * re-checks whatever comes back regardless, so a nonsense or hostile note
+ * can't produce a stored sentence that's missing the target word or isn't
+ * Japanese — worst case the request fails and the card is left as it was.
+ */
 async function regenerateSingleExample(index) {
   const hiragana = document.getElementById("customHiragana").value.trim();
   const kanji = effectiveKanji();
   const english = document.getElementById("customEnglish").value.trim();
-  const jlptLevel = document.getElementById("jlptLevel").value;
+  const level = examples[index]?.level || jlptLevel();
+  const instruction = (examples[index]?.instruction || "").trim();
   const status = document.getElementById("generateStatus");
 
   if (!hiragana || !english) {
@@ -657,12 +904,12 @@ async function regenerateSingleExample(index) {
     .filter(Boolean);
 
   setExamplesBusy(true);
-  status.textContent = "Regenerating this example…";
+  status.textContent = instruction ? "Rewriting this example…" : "Regenerating this example…";
 
   try {
     const { data } = await api("/api/generate-examples", {
       method: "POST",
-      body: { hiragana, kanji, english, jlptLevel, count: 1, avoid },
+      body: { hiragana, kanji, english, jlptLevel: level, count: 1, avoid, instruction },
     });
 
     const [replacement] = data.examples || [];
@@ -674,12 +921,16 @@ async function regenerateSingleExample(index) {
     // furigana: null — this is fresh AI text, so any furigana the replaced
     // (possibly dictionary-pulled) example carried no longer applies. It stops
     // being a "dictionary" example too, so a later change of meaning leaves it
-    // alone.
+    // alone. The level and the note are carried over deliberately: the note
+    // stays in the box so an unsatisfying result can be nudged again without
+    // retyping it.
     examples[index] = {
       plain: replacement.japanese,
       english: replacement.english,
       furigana: null,
       source: "ai",
+      level,
+      instruction,
     };
     updateExampleCard(index);
     status.textContent = "";
@@ -916,7 +1167,10 @@ async function loadJlptPreference() {
     .maybeSingle();
 
   const select = document.getElementById("jlptLevel");
-  if (data?.jlpt_level) select.value = data.jlpt_level;
+  if (data?.jlpt_level) {
+    select.value = data.jlpt_level;
+    syncJlptControls("main");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +1186,9 @@ function examplesFromRow(row) {
       plain: furiganaToPlain(e.furigana || ""),
       english: e.translation || "",
       furigana: e.furigana || null,
+      // Absent on every row saved before per-example levels existed, which is
+      // correct: those cards fall back to the page-wide level.
+      level: e.level || undefined,
     }));
   }
   if (row.example_furigana) {
@@ -976,6 +1233,17 @@ async function loadForEdit(id) {
 
   examples = examplesFromRow(row);
   more = moreFromRow(row);
+
+  // needs_furigana means the `furigana` field holds PLAIN text the Worker
+  // couldn't annotate, not bracket syntax. Dropping it here is essential:
+  // annotateForSave() skips anything that already carries furigana, so
+  // keeping it would save the un-annotated text as if it were authoritative
+  // and clear the flag — permanently losing the ruby for that word. Applies
+  // to `more` too, which the background generator now fills in as well.
+  if (row.needs_furigana) {
+    examples = examples.map((ex) => ({ ...ex, furigana: null }));
+    more = more.map((ex) => ({ ...ex, furigana: null }));
+  }
   pitch = Array.isArray(row.pitch) ? row.pitch : [];
   setPitch(document.getElementById("pitchDisplay"), pitch);
   document.getElementById("pitchRow").style.display = pitch.length ? "" : "none";
@@ -986,6 +1254,22 @@ async function loadForEdit(id) {
   document.getElementById("pageTitle").textContent = "Edit word";
   document.getElementById("formSubmitBtn").textContent = "Save";
   document.getElementById("cancelEditBtn").style.display = "";
+
+  // A word already in the list has been through the choice once; asking again
+  // to fix a typo would be three screens of nothing. Land on review, and point
+  // Back at step 1 — re-looking-up the word is the only step that's still
+  // meaningful from here, whereas "how should these be written?" is not.
+  document.getElementById("step3BackBtn").dataset.goto = "1";
+  document.getElementById("reviewHeading").textContent = "Example sentences";
+  if (row.jlpt_level) {
+    document.getElementById("jlptLevel").value = row.jlpt_level;
+    syncJlptControls("main");
+  }
+  // A row the Worker generated in the background shows plain text until the
+  // tagger has run; opening it for editing is a good moment to pay that off,
+  // and saving will clear needs_furigana (see saveWord).
+  if (row.needs_furigana) warmUpTagger();
+  goToStep(3, { force: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -997,11 +1281,20 @@ async function annotateForSave(list) {
   // Anything that already carries authoritative furigana (dictionary-pulled
   // sentences) needs no tagger at all, so don't pay for loading one unless
   // something in the list actually requires it.
+  // `level` rides along in the stored JSON (no migration — `examples` is
+  // jsonb) so reopening a word for editing restores each sentence's own
+  // difficulty instead of silently resetting every card to the page default.
+  // Undefined stays undefined, preserving "follow the default" as distinct
+  // from "was pinned to N5".
+  const shape = (ex) => {
+    const out = { furigana: ex.furigana, translation: ex.english.trim() };
+    if (ex.level) out.level = ex.level;
+    return out;
+  };
+
   const needsTagger = list.some((ex) => ex.plain.trim() && !ex.furigana);
   if (!needsTagger) {
-    return list
-      .filter((ex) => ex.plain.trim())
-      .map((ex) => ({ furigana: ex.furigana, translation: ex.english.trim() }));
+    return list.filter((ex) => ex.plain.trim()).map(shape);
   }
 
   // Save waits for the tagger rather than accepting "best effort" here — the
@@ -1031,9 +1324,206 @@ async function annotateForSave(list) {
           furigana = plain;
         }
       }
-      return { furigana, translation: ex.english.trim() };
+      return { ...shape(ex), furigana };
     });
 }
+
+/**
+ * Writes the current form state to custom_vocab and returns the row id.
+ *
+ * Shared by all four exits from the wizard (each step-2 choice plus step 3's
+ * Save), which is what keeps them consistent — there is exactly one place that
+ * knows the payload shape.
+ *
+ * IDEMPOTENT BY DESIGN: on a successful insert it adopts the new id as
+ * `editingId`, so a second call updates that row instead of inserting a
+ * duplicate. That matters because step 2's choices can fail *after* the word
+ * is already saved (an AI key that turns out to be missing), leaving the user
+ * on step 2 free to pick a different option — which must not create a second
+ * copy of the word.
+ *
+ * @param {object} overrides extra columns, e.g. the generation status
+ * @returns {Promise<{ ok: boolean, id?: string, message?: string }>}
+ */
+async function saveWord(overrides = {}) {
+  if (!session) return { ok: false, message: "Your session expired. Log in again." };
+
+  const storedExamples = await annotateForSave(examples);
+  const storedMore = await annotateForSave(more);
+  const first = storedExamples[0] || {};
+
+  const payload = {
+    user_id: session.user.id,
+    hiragana: document.getElementById("customHiragana").value.trim(),
+    kanji: effectiveKanji() || null,
+    english: document.getElementById("customEnglish").value.trim(),
+    examples: storedExamples,
+    more: storedMore,
+    pitch,
+    example_furigana: first.furigana || null,
+    translation: first.translation || null,
+    notes_furigana: document.getElementById("customNotes").value.trim() || null,
+    part_of_speech: partOfSpeech,
+    jisho_slug: jishoSlug,
+    // annotateForSave() has just run the tagger over everything here, so
+    // whatever this row owed is paid. Explicit rather than relying on the
+    // column default: editing a word the Worker generated in the background
+    // has to CLEAR the flag, not leave it set on hand-annotated text.
+    needs_furigana: false,
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  };
+
+  const query = editingId
+    ? supabaseClient.from("custom_vocab").update(payload).eq("id", editingId).select("id").single()
+    : supabaseClient.from("custom_vocab").insert(payload).select("id").single();
+
+  const { data, error } = await query;
+  if (error) return { ok: false, message: error.message };
+
+  editingId = String(data.id); // see IDEMPOTENT above
+  return { ok: true, id: editingId };
+}
+
+// ---------------------------------------------------------------------------
+// Step 2 — the three ways out
+// ---------------------------------------------------------------------------
+
+function setStep2Busy(busy, message = "") {
+  document.querySelectorAll("#choiceDictionary, #choiceBackground, #choiceReview").forEach((btn) => {
+    btn.disabled = busy;
+  });
+  document.getElementById("step2Status").textContent = message;
+  // Re-deriving this is what stops a disabled-because-busy dictionary card
+  // from coming back enabled when there were never any sentences to use.
+  if (!busy) updateDictionaryChoice();
+}
+
+/** CHOICE 1 — save the corpus sentences and leave. */
+async function chooseDictionary() {
+  const error = document.getElementById("step2Error");
+  error.textContent = "";
+  setStep2Busy(true, "Saving…");
+
+  // The card says "use the dictionary's sentences", so that is what gets
+  // saved — literally, even if the user has been through the AI review step
+  // and its generated sentences are still sitting in `examples`. Restoring
+  // from the stash is what makes coming back here a real second chance rather
+  // than a save of whatever the last path happened to leave behind.
+  examples = dictionarySentences.map((s) => ({ ...s }));
+  renderExamples();
+
+  const result = await saveWord({ example_status: "ready", example_error: null });
+  if (!result.ok) {
+    error.textContent = result.message;
+    setStep2Busy(false);
+    return;
+  }
+  window.location.href = "my-vocab.html";
+}
+
+/**
+ * CHOICE 2 — save now, generate later.
+ *
+ * ORDER IS LOAD-BEARING: the row is inserted BEFORE the generation is
+ * requested, so the worst outcome is a saved word whose sentences didn't
+ * arrive (visible and retryable on My Vocab) rather than a word that vanished
+ * because a provider was down.
+ *
+ * The dictionary sentences are saved along with it as a safety net. On success
+ * the Worker replaces them with the AI ones — this choice is "AI writes them",
+ * and merging two sources server-side would mean teaching the Worker about
+ * furigana it can't produce. On failure they're what the row keeps.
+ */
+async function chooseBackground() {
+  const error = document.getElementById("step2Error");
+  error.textContent = "";
+  setStep2Busy(true, "Saving…");
+
+  const level = jlptLevel();
+  const result = await saveWord({
+    example_status: "pending",
+    example_error: null,
+    jlpt_level: level,
+  });
+  if (!result.ok) {
+    error.textContent = result.message;
+    setStep2Busy(false);
+    return;
+  }
+
+  try {
+    await api("/api/queue-examples", {
+      method: "POST",
+      body: {
+        vocabId: result.id,
+        hiragana: document.getElementById("customHiragana").value.trim(),
+        kanji: effectiveKanji(),
+        english: document.getElementById("customEnglish").value.trim(),
+        jlptLevel: level,
+        count: MAX_EXAMPLES,
+      },
+    });
+  } catch (e) {
+    // The request never started, so nothing will ever clear 'pending'. Flag it
+    // here rather than leaving a row spinning forever — and show the reason
+    // now, since "no AI key" is something the user can act on immediately.
+    await supabaseClient
+      .from("custom_vocab")
+      .update({ example_status: "failed", example_error: e.message })
+      .eq("id", result.id);
+    error.textContent = `Saved "${payloadHeadword()}", but the sentences couldn't be started: ${e.message}`;
+    setStep2Busy(false);
+    return;
+  }
+
+  window.location.href = "my-vocab.html?generating=1";
+}
+
+/** CHOICE 3 — generate now, then hand over to the review step. */
+async function chooseReview() {
+  const error = document.getElementById("step2Error");
+  error.textContent = "";
+  setStep2Busy(true, "Writing example sentences…");
+
+  // Make room first. generateExamples() only TOPS UP to MAX_EXAMPLES, so with
+  // three corpus sentences already pulled it would generate nothing at all and
+  // drop the user on a review screen containing no AI sentences whatsoever —
+  // the exact opposite of the choice they just made. Only the automatic pulls
+  // are cleared; anything typed or edited by hand is already marked "manual".
+  examples = examples.filter((ex) => ex.source !== "dictionary");
+  renderExamples();
+
+  // Reuses the same top-up generator step 3 uses, so what lands in the review
+  // list is identical to pressing "Top up" there.
+  await generateExamples();
+
+  setStep2Busy(false);
+
+  const failure = document.getElementById("generateStatus").textContent;
+  if (failure) {
+    // generateExamples() reports into #generateStatus, which lives on step 3.
+    // Surface it here instead of silently moving the user to a screen whose
+    // error message they'd have to scroll to find.
+    error.textContent = failure;
+    return;
+  }
+  goToStep(3);
+}
+
+/** The escape hatch: no AI, no corpus, just write them by hand on step 3. */
+function chooseManual() {
+  if (examples.length === 0) addManualExample();
+  goToStep(3);
+}
+
+function payloadHeadword() {
+  return effectiveKanji() || document.getElementById("customHiragana").value.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — final save
+// ---------------------------------------------------------------------------
 
 async function handleFormSubmit(e) {
   e.preventDefault();
@@ -1045,36 +1535,13 @@ async function handleFormSubmit(e) {
   submitBtn.disabled = true;
 
   try {
-    const storedExamples = await annotateForSave(examples);
-    const storedMore = await annotateForSave(more);
-    const first = storedExamples[0] || {};
-
-    const payload = {
-      user_id: session.user.id,
-      hiragana: document.getElementById("customHiragana").value.trim(),
-      kanji: effectiveKanji() || null,
-      english: document.getElementById("customEnglish").value.trim(),
-      examples: storedExamples,
-      more: storedMore,
-      pitch,
-      example_furigana: first.furigana || null,
-      translation: first.translation || null,
-      notes_furigana: document.getElementById("customNotes").value.trim() || null,
-      part_of_speech: partOfSpeech,
-      jisho_slug: jishoSlug,
-      updated_at: new Date().toISOString(),
-    };
-
-    const query = editingId
-      ? supabaseClient.from("custom_vocab").update(payload).eq("id", editingId)
-      : supabaseClient.from("custom_vocab").insert(payload);
-
-    const { error } = await query;
-    if (error) {
-      formError.textContent = error.message;
+    // Reaching this screen means the sentences were reviewed by a human, so
+    // there is nothing outstanding on the row whatever it was before.
+    const result = await saveWord({ example_status: "ready", example_error: null });
+    if (!result.ok) {
+      formError.textContent = result.message;
       return;
     }
-
     window.location.href = "my-vocab.html";
   } finally {
     submitBtn.disabled = false;
@@ -1138,9 +1605,46 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("generateMoreBtn").addEventListener("click", generateMorePhrases);
   document.getElementById("addManualMoreBtn").addEventListener("click", addManualMorePhrase);
 
+  // --- wizard navigation -------------------------------------------------
+  document.getElementById("toStep2Btn").addEventListener("click", () => goToStep(2));
+  document.querySelectorAll(".wizard-back").forEach((btn) => {
+    btn.addEventListener("click", () => goToStep(Number(btn.dataset.goto), { force: true }));
+  });
+  document.querySelectorAll("#wizardProgress li").forEach((li) => {
+    const step = Number(li.dataset.step);
+    li.querySelector("button").addEventListener("click", () => {
+      // Going BACK is always allowed; going forward still has to pass the
+      // word check in goToStep(), so this can't be used to skip step 1.
+      goToStep(step, { force: step < currentStep });
+    });
+  });
+
+  // Typing in the required fields both re-validates and keeps the collapsed
+  // summary truthful, so manual entry (no dictionary hit) behaves the same.
+  ["customHiragana", "customEnglish", "customKanji"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", () => {
+      updateWordDetailsSummary();
+      if (wordIsUsable()) document.getElementById("step1Error").textContent = "";
+    });
+  });
+
+  // --- step 2 choices ----------------------------------------------------
+  document.getElementById("choiceDictionary").addEventListener("click", chooseDictionary);
+  document.getElementById("choiceBackground").addEventListener("click", chooseBackground);
+  document.getElementById("choiceReview").addEventListener("click", chooseReview);
+  document.getElementById("choiceManual").addEventListener("click", (e) => {
+    e.preventDefault();
+    chooseManual();
+  });
+
+  document.getElementById("jlptLevel").addEventListener("change", () => syncJlptControls("main"));
+  document.getElementById("jlptLevelReview").addEventListener("change", () => syncJlptControls("review"));
+
   updateNotesPreview();
   renderExamples();
   renderMore();
+  updateDictionaryChoice();
+  goToStep(1, { force: true });
 });
 
 document.addEventListener("auth-state-changed", async (e) => {

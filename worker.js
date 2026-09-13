@@ -26,9 +26,11 @@ import * as llmProviders from './functions/api/llm-providers.js';
 import * as llmKeys from './functions/api/llm-keys/index.js';
 import * as llmKeysValidate from './functions/api/llm-keys/validate.js';
 import * as llmKeysActive from './functions/api/llm-keys/active.js';
+import * as llmKeysModel from './functions/api/llm-keys/model.js';
 import * as jisho from './functions/api/jisho.js';
 import * as sentences from './functions/api/sentences.js';
 import * as generateExamples from './functions/api/generate-examples.js';
+import * as queueExamples from './functions/api/queue-examples.js';
 
 // ADD NEW ENDPOINTS HERE.
 const ROUTES = {
@@ -36,9 +38,11 @@ const ROUTES = {
   '/api/llm-keys': llmKeys,
   '/api/llm-keys/validate': llmKeysValidate,
   '/api/llm-keys/active': llmKeysActive,
+  '/api/llm-keys/model': llmKeysModel,
   '/api/jisho': jisho,
   '/api/sentences': sentences,
   '/api/generate-examples': generateExamples,
+  '/api/queue-examples': queueExamples,
 };
 
 function json(body, status) {

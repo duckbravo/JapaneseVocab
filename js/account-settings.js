@@ -212,6 +212,40 @@ function buildRow(p) {
   const hint = document.createElement("div");
   hint.className = "key-hint";
 
+  // --- model picker -------------------------------------------------------
+  // Only meaningful once a key is stored, so renderRow() hides it otherwise.
+  // It exists because on a free tier the model choice is mostly a choice of
+  // daily quota: Google's Flash-Lite line allows roughly 25x the requests of
+  // the Flash line, which is why the registry default is a Lite model.
+  const modelRow = document.createElement("div");
+  modelRow.className = "provider-row-model";
+
+  const modelLabel = document.createElement("label");
+  modelLabel.textContent = "Model";
+
+  const modelSelect = document.createElement("select");
+  modelSelect.setAttribute("aria-label", `Model to use for ${p.label}`);
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  const defaultEntry = (p.models || []).find((m) => m.id === p.defaultModel);
+  defaultOption.textContent = `Recommended — ${defaultEntry ? defaultEntry.label.replace(/\s*\(recommended\)$/i, "") : p.defaultModel}`;
+  modelSelect.appendChild(defaultOption);
+
+  (p.models || []).forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.label;
+    modelSelect.appendChild(opt);
+  });
+
+  modelLabel.appendChild(modelSelect);
+
+  const modelNote = document.createElement("div");
+  modelNote.className = "settings-note";
+
+  modelRow.append(modelLabel, modelNote);
+
   const controls = document.createElement("div");
   controls.className = "provider-row-controls";
 
@@ -233,9 +267,14 @@ function buildRow(p) {
   const msg = document.createElement("div");
   msg.className = "auth-error";
 
-  root.append(head, pricingNote, hint, controls, msg);
+  root.append(head, pricingNote, hint, modelRow, controls, msg);
 
-  const row = { root, input, msg, pill, hint, saveBtn, recheckBtn, removeBtn, toggleBtn };
+  const row = {
+    root, input, msg, pill, hint, saveBtn, recheckBtn, removeBtn, toggleBtn,
+    modelRow, modelSelect, modelNote,
+  };
+
+  modelSelect.addEventListener("change", () => handleModelChange(p.id, modelSelect.value));
 
   toggleBtn.addEventListener("click", () => {
     input.type = input.type === "password" ? "text" : "password";
@@ -286,6 +325,51 @@ function renderRow(providerId) {
 
   row.recheckBtn.style.display = record ? "" : "none";
   row.removeBtn.style.display = record ? "" : "none";
+
+  // The model picker is pointless without a key to use it with.
+  row.modelRow.style.display = record ? "" : "none";
+  if (record) {
+    // "" is the default option — a stored null means "follow the registry
+    // default", which is a real choice, not a missing value.
+    row.modelSelect.value = record.model || "";
+    const provider = providerRegistry.find((p) => p.id === providerId);
+    const chosenId = record.model || provider?.defaultModel;
+    const entry = (provider?.models || []).find((m) => m.id === chosenId);
+    row.modelNote.textContent = entry?.note || "";
+  }
+}
+
+/**
+ * Persists a model choice. The server re-checks it against the registry — the
+ * id ends up interpolated into a provider URL, so "whatever the select said"
+ * is not trusted on the strength of it having come from our own <option>.
+ */
+async function handleModelChange(providerId, model) {
+  const row = rows.get(providerId);
+  if (!row) return;
+
+  row.msg.className = "auth-error";
+  row.msg.textContent = "";
+  row.modelSelect.disabled = true;
+
+  try {
+    const { data } = await api("/api/llm-keys/model", {
+      method: "POST",
+      // "" means "use the default", which the API expresses as null.
+      body: { provider: providerId, model: model || null },
+    });
+    keyState = data;
+    renderRow(providerId);
+    row.msg.className = "auth-error auth-success";
+    row.msg.textContent = "Model updated.";
+  } catch (e) {
+    row.msg.textContent = e.message;
+    // Put the control back to whatever is actually stored, so the UI never
+    // shows a selection the server rejected.
+    renderRow(providerId);
+  } finally {
+    row.modelSelect.disabled = false;
+  }
 }
 
 function renderActiveProviderSelect() {

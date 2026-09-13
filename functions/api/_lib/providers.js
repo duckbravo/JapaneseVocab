@@ -118,19 +118,85 @@ export const PROVIDERS = {
     maxLength: 300,
     formatHint: 'Google keys start with "AQ." (newer) or "AIza" (legacy).',
 
-    // Cheap, fast, and on the free tier — good enough for a handful of short
-    // example sentences. See generate() below for how this is used.
+    // MODEL CHOICE IS A QUOTA DECISION, NOT A CAPABILITY ONE.
     //
-    // gemini-2.5-flash (the original pick here) started erroring out from
-    // under us: Gemini 3 shipped and Google has a track record of pulling
-    // 2.x-series availability ahead of the officially announced retirement
-    // date (see the "deprecated without warning earlier than shutdown date"
-    // reports on the Google AI dev forum). gemini-3.5-flash has been GA since
-    // 2026-05-19 — new enough to not be EOL'd again immediately, old enough
-    // to not carry brand-new-release rollout quirks. Verified Aug 2026
-    // against https://ai.google.dev/pricing that its free tier terms match
-    // the note below.
-    defaultModel: 'gemini-3.5-flash',
+    // Writing three 15-30 character Japanese sentences against a JSON schema is
+    // near the bottom of what any current model finds difficult, so the binding
+    // constraint is how many requests a free-tier key gets per day — and on
+    // Google's free tier that differs by more than an order of magnitude
+    // between the Flash and Flash-Lite lines.
+    //
+    // As of 2026-09-13, community reports put free-tier Flash at ~20 requests
+    // per day (cut from 250) and Flash-Lite at ~500. Google no longer publishes
+    // the per-model table at all — https://ai.google.dev/gemini-api/docs/rate-limits
+    // now says limits "can be viewed in Google AI Studio" and sends you to
+    // https://aistudio.google.com/rate-limit — so these numbers come from the
+    // developer forum, not from documentation, and should be treated as
+    // indicative. What is NOT in doubt is the ordering: Flash-Lite gets
+    // dramatically more free requests than Flash.
+    //
+    // Hence Flash-Lite as the default. The previous default, gemini-3.5-flash,
+    // meant a free-tier user ran out after ~20 generations — and since a
+    // backgrounded word costs TWO calls (sentences + phrases), that was ~10
+    // words a day.
+    //
+    // Free-tier terms verified 2026-09-13 against https://ai.google.dev/pricing:
+    // every model below is "Free of charge" with "content used to improve our
+    // products: Yes", so `pricingNote` stays accurate for all of them.
+    defaultModel: 'gemini-3.5-flash-lite',
+
+    // Ordered fallback chain, tried top to bottom when a model returns a quota
+    // error. Highest free quota first, so the daily allowance is spent on the
+    // cheapest model before falling back to a scarcer, stronger one.
+    //
+    // `note` is shown in the Account Settings picker — users pick models on
+    // quota grounds here, so the note says quota, not benchmark scores.
+    models: [
+      {
+        id: 'gemini-3.5-flash-lite',
+        label: 'Flash-Lite 3.5 (recommended)',
+        note: 'Highest free-tier allowance — roughly 500 requests a day. Plenty for example sentences.',
+      },
+      {
+        id: 'gemini-2.5-flash-lite',
+        label: 'Flash-Lite 2.5',
+        note: 'Previous-generation Lite. Similar allowance; use if 3.5 Lite is unavailable on your key.',
+      },
+      {
+        id: 'gemini-3.5-flash',
+        label: 'Flash 3.5',
+        note: 'Stronger writing, but only about 20 requests a day on the free tier.',
+      },
+      {
+        id: 'gemini-2.5-flash',
+        label: 'Flash 2.5',
+        note: 'Older Flash. Last resort when the newer models are exhausted or unavailable.',
+      },
+    ],
+
+    /**
+     * Live model discovery. Google's catalogue turns over every 1-3 months and
+     * has been pulled ahead of announced retirement dates before, so the
+     * hardcoded chain above is a preference order, not a source of truth —
+     * _lib/models.js intersects it with whatever this returns.
+     *
+     * Uses the same endpoint and header as validate(), so it costs no tokens.
+     */
+    async listModels({ apiKey, signal }) {
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',
+        { headers: { 'x-goog-api-key': apiKey }, signal },
+      );
+      if (!res.ok) return null;
+
+      const body = await res.json().catch(() => null);
+      if (!Array.isArray(body?.models)) return null;
+
+      return body.models
+        // "models/gemini-3.5-flash-lite" -> "gemini-3.5-flash-lite"
+        .map((m) => String(m.name || '').replace(/^models\//, ''))
+        .filter(Boolean);
+    },
 
     // Verified Aug 2026 against https://ai.google.dev/pricing — the Flash
     // family is listed "Free of charge" on the free tier, and the free tier
@@ -248,7 +314,32 @@ export const PROVIDERS = {
     maxLength: 300,
     formatHint: 'Anthropic keys start with "sk-ant-".',
 
-    defaultModel: 'claude-opus-5',
+    // Haiku, not Opus. Anthropic has no free tier, so every call is real money,
+    // and the task — three short sentences against a fixed JSON schema — does
+    // not distinguish frontier models from small ones. The previous default
+    // here was claude-opus-5, which is the most expensive model Anthropic
+    // sells; using it to write "I ate ramen at a food stall" is a large
+    // multiple of the cost for no observable gain. Sonnet is offered for anyone
+    // who disagrees after seeing both.
+    defaultModel: 'claude-haiku-4-5-20251001',
+
+    models: [
+      {
+        id: 'claude-haiku-4-5-20251001',
+        label: 'Haiku 4.5 (recommended)',
+        note: 'Cheapest and fastest. More than enough for example sentences.',
+      },
+      {
+        id: 'claude-sonnet-5',
+        label: 'Sonnet 5',
+        note: 'Noticeably more expensive per call. Choose it if Haiku output disappoints you.',
+      },
+      {
+        id: 'claude-opus-5',
+        label: 'Opus 5',
+        note: 'Most capable and by far the most expensive. Rarely worth it for this task.',
+      },
+    ],
 
     // Anthropic's rate-limit docs list Start/Build/Scale/Custom tiers and no
     // free tier. New Console accounts are widely reported to get a small
@@ -344,7 +435,23 @@ export const PROVIDERS = {
     maxLength: 300,
     formatHint: 'OpenAI keys start with "sk-" (often "sk-proj-").',
 
+    // Already a small, cheap model — kept. OpenAI has no free tier either, so
+    // the same reasoning as Anthropic applies: spend the least that does the
+    // job well.
     defaultModel: 'gpt-4.1-mini',
+
+    models: [
+      {
+        id: 'gpt-4.1-mini',
+        label: 'GPT-4.1 mini (recommended)',
+        note: 'Small, cheap, and comfortably capable of short example sentences.',
+      },
+      {
+        id: 'gpt-4o-mini',
+        label: 'GPT-4o mini',
+        note: 'Older small model. A fallback if 4.1 mini is unavailable on your account.',
+      },
+    ],
 
     // OpenAI's pricing page lists no free tier and no starter credits; the
     // only free surfaces are moderation and file-search storage.
@@ -428,6 +535,11 @@ const PUBLIC_PROVIDER_FIELDS = [
   'formatHint',
   'pricingLabel',
   'pricingNote',
+  // Both are needed by the Account Settings model picker: the options to offer,
+  // and which one applies when the user hasn't chosen one. Safe to expose —
+  // model ids and their quota notes are public product information.
+  'models',
+  'defaultModel',
 ];
 
 export function publicProviderList() {

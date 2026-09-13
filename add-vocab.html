@@ -33,127 +33,252 @@
     Please <a href="#" id="guestLoginLink">log in</a> to create your own vocab words.
   </p>
 
-  <form id="customVocabForm" class="vocab-form" style="display: none;">
-    <h2 id="formTitle">Look up a word</h2>
+  <!--
+    THREE STEPS, ONE FORM.
+    ======================
+    Every field below used to be on screen at once, which on a phone meant
+    scrolling past a dictionary search, six inputs, two generator sections and
+    a notes box before reaching Save. The sections are now shown one at a time
+    by js/add-vocab.js (goToStep()), which only toggles `hidden` — it never
+    rebuilds markup, so every element ID here is still the one the existing
+    lookup/generate/save code reaches for.
 
-    <label for="jishoSearchInput">
-      Search the dictionary <small>(optional — fills in the fields below)</small>
-      <div class="jisho-search-row">
-        <input type="text" id="jishoSearchInput" placeholder="食べる, たべる, to eat…" />
-        <button type="button" id="jishoSearchBtn" class="btn-secondary">🔍 Search</button>
+    They stay inside a single <form> deliberately: one submit handler, one
+    validation pass, and the browser's own "required" handling still works
+    across steps.
+  -->
+  <form id="customVocabForm" class="vocab-form vocab-wizard" style="display: none;">
+
+    <!-- Tapping a completed step goes back to it; later steps aren't reachable
+         until their prerequisites are filled in. -->
+    <ol class="wizard-progress" id="wizardProgress">
+      <li data-step="1"><button type="button" class="wizard-progress-btn">Word</button></li>
+      <li data-step="2"><button type="button" class="wizard-progress-btn">Examples</button></li>
+      <li data-step="3"><button type="button" class="wizard-progress-btn">Review</button></li>
+    </ol>
+
+    <!-- ================================================================
+         STEP 1 — which word, and which of its meanings
+         ================================================================ -->
+    <section class="wizard-step" data-step="1" hidden>
+      <h2>Find the word</h2>
+
+      <label for="jishoSearchInput">
+        Search the dictionary
+        <div class="jisho-search-row">
+          <input type="text" id="jishoSearchInput" placeholder="食べる, たべる, to eat…"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <button type="button" id="jishoSearchBtn" class="btn-secondary">🔍</button>
+        </div>
+      </label>
+      <div id="jishoStatus" class="settings-note"></div>
+      <div id="dictFormSuggestion" class="settings-note" style="display: none;"></div>
+
+      <label for="jishoResults" id="jishoResultsLabel" style="display: none;">
+        Select the word you mean
+        <select id="jishoResults"></select>
+      </label>
+
+      <!--
+        A single dictionary entry often has several distinct meanings (食べる is
+        both "to eat" and "to live on (a salary)"). This picks which of them the
+        card records. It defaults to ALL of them, because the example sentences
+        can't be tied to one meaning — recording every meaning is what keeps the
+        card honest about what its sentences show. Hidden when the word only has
+        one meaning anyway.
+      -->
+      <label for="senseSelect" id="senseSelectLabel" style="display: none;">
+        Which meaning to record?
+        <select id="senseSelect"></select>
+        <small>Example sentences show the word in general use, not one specific meaning.</small>
+      </label>
+      <div id="otherForms" class="settings-note" style="display: none;"></div>
+
+      <!--
+        Collapsed by default: when the search filled these in there is nothing
+        to do here, and on a phone three more inputs is the difference between
+        one screen and two. Opens automatically when there's no dictionary
+        entry backing the form (manual entry) or a required field is empty.
+      -->
+      <details class="wizard-details" id="wordDetails">
+        <summary>Word details <span id="wordDetailsSummary" class="wizard-summary-value"></span></summary>
+
+        <label for="customHiragana">
+          Hiragana
+          <input type="text" id="customHiragana" required />
+        </label>
+
+        <label for="customKanji">
+          Kanji <small>(optional — leave blank for kana-only words)</small>
+          <input type="text" id="customKanji" />
+        </label>
+
+        <label class="checkbox-label" for="kanaOnly">
+          <input type="checkbox" id="kanaOnly" />
+          This word is usually written in kana, not kanji
+        </label>
+        <div id="kanaOnlyHint" class="settings-note" style="display: none;"></div>
+
+        <label for="customEnglish">
+          English
+          <input type="text" id="customEnglish" required />
+        </label>
+      </details>
+
+      <!-- Pitch accent from the dictionary; hidden when there's none on record. -->
+      <div id="pitchRow" class="settings-note" style="display: none;">
+        Pitch accent: <span id="pitchDisplay"></span>
       </div>
-    </label>
-    <div id="jishoStatus" class="settings-note"></div>
-    <div id="dictFormSuggestion" class="settings-note" style="display: none;"></div>
 
-    <label for="jishoResults" id="jishoResultsLabel" style="display: none;">
-      Select the word you mean
-      <select id="jishoResults"></select>
-    </label>
+      <div class="wizard-nav">
+        <a href="my-vocab.html" class="btn-secondary wizard-back-link">Cancel</a>
+        <button type="button" id="toStep2Btn" class="btn-primary">Next: examples →</button>
+      </div>
+      <div id="step1Error" class="auth-error"></div>
+    </section>
 
-    <!--
-      A single dictionary entry often has several distinct meanings (食べる is
-      both "to eat" and "to live on (a salary)"). This picks which of them the
-      card records. It defaults to ALL of them, because the example sentences
-      below can't be tied to one meaning — recording every meaning is what
-      keeps the card honest about what its sentences show. Hidden when the word
-      only has one meaning anyway.
-    -->
-    <label for="senseSelect" id="senseSelectLabel" style="display: none;">
-      Which meaning to record?
-      <select id="senseSelect"></select>
-      <small>Sentences below show the word in general use, not one specific meaning.</small>
-    </label>
-    <div id="otherForms" class="settings-note" style="display: none;"></div>
+    <!-- ================================================================
+         STEP 2 — how the example sentences get written
+         ================================================================ -->
+    <section class="wizard-step" data-step="2" hidden>
+      <h2>Example sentences</h2>
+      <p class="settings-note">Pick one. You can always edit the word later.</p>
 
-    <h2>Word details</h2>
+      <div class="choice-list">
 
-    <label for="customHiragana">
-      Hiragana
-      <input type="text" id="customHiragana" required />
-    </label>
+        <!--
+          CHOICE 1 — nothing to wait for. Real corpus sentences were already
+          fetched during step 1, so this saves and leaves immediately.
+        -->
+        <button type="button" class="choice-card" id="choiceDictionary">
+          <span class="choice-title">📖 Use the dictionary's sentences</span>
+          <span class="choice-desc" id="choiceDictionaryDesc">Checking…</span>
+          <span class="choice-meta">Saves straight away — no AI key needed.</span>
+        </button>
 
-    <label for="customKanji">
-      Kanji <small>(optional — leave blank for kana-only words)</small>
-      <input type="text" id="customKanji" />
-    </label>
+        <!--
+          CHOICE 2 — the row is saved as 'pending' FIRST, then the Worker
+          finishes writing under waitUntil(). Leaving this page (or closing the
+          tab) does not cancel it; see functions/api/queue-examples.js. This is
+          the only path that fills in the short "More" phrases without asking,
+          since it's also the only one where waiting for a second generation
+          costs the user nothing.
+        -->
+        <button type="button" class="choice-card" id="choiceBackground">
+          <span class="choice-title">✨ Write them with AI — in the background</span>
+          <span class="choice-desc">Save now and carry on adding words. Full sentences <em>and</em> short usage phrases appear on My Vocab when they're done.</span>
+          <span class="choice-meta">Needs an AI key. Anything that fails is flagged on My Vocab.</span>
+        </button>
 
-    <label class="checkbox-label" for="kanaOnly">
-      <input type="checkbox" id="kanaOnly" />
-      This word is usually written in kana, not kanji
-    </label>
-    <div id="kanaOnlyHint" class="settings-note" style="display: none;"></div>
+        <!-- CHOICE 3 — generate, then land on step 3 with the results loaded. -->
+        <button type="button" class="choice-card" id="choiceReview">
+          <span class="choice-title">✍️ Write them with AI — and check them first</span>
+          <span class="choice-desc">Generates now and takes you to a review screen to edit, replace or remove each one.</span>
+          <span class="choice-meta">Needs an AI key.</span>
+        </button>
 
-    <label for="customEnglish">
-      English
-      <input type="text" id="customEnglish" required />
-    </label>
+      </div>
 
-    <!-- Pitch accent from the dictionary; hidden when there's none on record. -->
-    <div id="pitchRow" class="settings-note" style="display: none;">
-      Pitch accent: <span id="pitchDisplay"></span>
-    </div>
+      <label for="jlptLevel" class="wizard-inline-field">
+        JLPT level for AI sentences
+        <select id="jlptLevel">
+          <option value="N5">N5 (beginner)</option>
+          <option value="N4">N4</option>
+          <option value="N3">N3</option>
+          <option value="N2">N2</option>
+          <option value="N1">N1 (advanced)</option>
+        </select>
+      </label>
 
-    <h2>Example sentences</h2>
-    <p class="settings-note">
-      Real sentences from the dictionary are pulled in automatically when you
-      pick a word above. Use <strong>Generate</strong> to top up to 3 with
-      AI-written sentences at your JLPT level (needs an AI key — set one up in
-      <a href="account-settings.html">Account Settings</a>). Edit, remove or
-      regenerate any of them; all of them show on the My Vocab table.
-    </p>
+      <p class="settings-note">
+        No AI key yet? <a href="account-settings.html">Add one in Account Settings</a>,
+        or <a href="#" id="choiceManual">write the sentences yourself</a>.
+      </p>
 
-    <label for="jlptLevel">
-      JLPT level
-      <select id="jlptLevel">
-        <option value="N5">N5 (beginner)</option>
-        <option value="N4">N4</option>
-        <option value="N3">N3</option>
-        <option value="N2">N2</option>
-        <option value="N1">N1 (advanced)</option>
-      </select>
-    </label>
+      <div id="step2Status" class="settings-note"></div>
+      <div id="step2Error" class="auth-error"></div>
 
-    <!--
-      "Generate" TOPS UP to 3 rather than replacing: the dictionary sentences
-      pulled in automatically must survive it. Replacing an individual one is
-      what each card's own 🔄 button is for.
-    -->
-    <div class="vocab-form-actions">
-      <button type="button" id="generateBtn" class="btn-secondary">✨ Generate examples</button>
-      <button type="button" id="addManualBtn" class="btn-secondary">✏️ Add manually</button>
-    </div>
-    <div id="generateStatus" class="settings-note"></div>
+      <div class="wizard-nav">
+        <button type="button" class="btn-secondary wizard-back" data-goto="1">← Back</button>
+      </div>
+    </section>
 
-    <div id="examplesList"></div>
+    <!-- ================================================================
+         STEP 3 — review and save
+         ================================================================ -->
+    <section class="wizard-step" data-step="3" hidden>
+      <h2 id="reviewHeading">Review the sentences</h2>
+      <p class="settings-note" id="reviewIntro">
+        Edit any of them directly, or set a sentence's own JLPT level and say how
+        you want it changed — "about food", "more polite", "shorter" — then press
+        🔄 to rewrite just that one. All of them show on My Vocab.
+      </p>
 
-    <h2>More examples <small>(optional)</small></h2>
-    <p class="settings-note">
-      Two short phrases showing typical usage — e.g. "友達に会います — meet a
-      friend" — rather than full sentences. Mirrors the "More" column on the
-      verb and i-adjective pages. Uses the same JLPT level as above.
-    </p>
+      <div class="vocab-form-actions">
+        <button type="button" id="generateBtn" class="btn-secondary">✨ Top up to 3</button>
+        <button type="button" id="addManualBtn" class="btn-secondary">✏️ Add one</button>
+      </div>
+      <div id="generateStatus" class="settings-note"></div>
 
-    <div class="vocab-form-actions">
-      <button type="button" id="generateMoreBtn" class="btn-secondary">✨ Generate short phrases</button>
-      <button type="button" id="addManualMoreBtn" class="btn-secondary" style="display: none;">✏️ Add manually</button>
-    </div>
-    <div id="generateMoreStatus" class="settings-note"></div>
+      <div id="examplesList"></div>
 
-    <div id="moreList"></div>
+      <!--
+        Optional extras, collapsed. Two short "More" phrases and the notes
+        field are genuinely useful but wanted by almost nobody on the first
+        pass, and on a phone they were most of the scroll height of the old
+        single-page form.
+      -->
+      <details class="wizard-details" id="extrasDetails">
+        <summary>Optional extras <span class="wizard-summary-value">short phrases, notes</span></summary>
 
-    <label for="customNotes">
-      Notes <small>(optional, bracket syntax, e.g. 食べる[たべる]をたべます)</small>
-      <textarea id="customNotes" rows="2"></textarea>
-    </label>
-    <div id="notesPreview" class="furigana-preview"></div>
+        <h3>More examples</h3>
+        <p class="settings-note">
+          Two short phrases showing typical usage — e.g. "友達に会います — meet a
+          friend" — rather than full sentences. Mirrors the "More" column on the
+          verb and i-adjective pages.
+        </p>
 
-    <div id="formError" class="auth-error"></div>
+        <!--
+          The canonical JLPT control lives on step 2, which edit mode never
+          shows. Rather than leave regeneration here stuck on N5, this twin is
+          kept in sync with it both ways by syncJlptControls() in
+          js/add-vocab.js. Two elements, one value — they can't share an id.
+        -->
+        <label for="jlptLevelReview" class="wizard-inline-field">
+          JLPT level
+          <select id="jlptLevelReview">
+            <option value="N5">N5 (beginner)</option>
+            <option value="N4">N4</option>
+            <option value="N3">N3</option>
+            <option value="N2">N2</option>
+            <option value="N1">N1 (advanced)</option>
+          </select>
+        </label>
 
-    <div class="vocab-form-actions">
-      <button type="submit" id="formSubmitBtn">Add</button>
-      <a href="my-vocab.html" id="cancelEditBtn" class="btn-secondary" style="display: none; text-decoration: none; text-align: center;">Cancel</a>
-    </div>
+        <div class="vocab-form-actions">
+          <button type="button" id="generateMoreBtn" class="btn-secondary">✨ Generate short phrases</button>
+          <button type="button" id="addManualMoreBtn" class="btn-secondary" style="display: none;">✏️ Add manually</button>
+        </div>
+        <div id="generateMoreStatus" class="settings-note"></div>
+
+        <div id="moreList"></div>
+
+        <label for="customNotes">
+          Notes <small>(optional, bracket syntax, e.g. 食べる[たべる]をたべます)</small>
+          <textarea id="customNotes" rows="2"></textarea>
+        </label>
+        <div id="notesPreview" class="furigana-preview"></div>
+      </details>
+
+      <div id="formError" class="auth-error"></div>
+
+      <div class="wizard-nav">
+        <button type="button" class="btn-secondary wizard-back" data-goto="2" id="step3BackBtn">← Back</button>
+        <button type="submit" id="formSubmitBtn" class="btn-primary">Add word</button>
+        <a href="my-vocab.html" id="cancelEditBtn" class="btn-secondary" style="display: none; text-decoration: none; text-align: center;">Cancel</a>
+      </div>
+    </section>
+
   </form>
 
   <script src="js/sidebar-nav.js"></script>

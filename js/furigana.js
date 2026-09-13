@@ -372,10 +372,27 @@ function renderPitch(pitch) {
   pitch.forEach((entry, i) => {
     if (!entry || typeof entry.part !== "string") return;
     const span = document.createElement("span");
-    // The drop is what actually defines the accent, so mark the last high
-    // mora before a low one rather than leaving the reader to infer it.
-    const dropsAfter = entry.high === true && pitch[i + 1]?.high === false;
-    span.className = `pitch-${entry.high === true ? "high" : "low"}${dropsAfter ? " pitch-drop" : ""}`;
+
+    // BOTH transitions get a vertical connector, on the mora BEFORE the
+    // change — its right border spans the full box height, bridging the low
+    // line (drawn at the bottom) and the high line (drawn at the top).
+    //
+    // Only the drop used to be marked, on the reasoning that the drop is what
+    // defines the accent type while the initial rise is predictable and
+    // carries no lexical information. That's true linguistically, but it left
+    // the contour visibly broken at every rise — た‾べる rendered as two
+    // disconnected line segments, which reads as a rendering fault rather
+    // than as "this transition doesn't matter".
+    const next = pitch[i + 1];
+    const isHigh = entry.high === true;
+    const dropsAfter = isHigh && next?.high === false;
+    const risesAfter = !isHigh && next?.high === true;
+
+    const classes = [isHigh ? "pitch-high" : "pitch-low"];
+    if (dropsAfter) classes.push("pitch-drop");
+    if (risesAfter) classes.push("pitch-rise");
+    span.className = classes.join(" ");
+
     span.textContent = entry.part;
     wrap.appendChild(span);
   });
