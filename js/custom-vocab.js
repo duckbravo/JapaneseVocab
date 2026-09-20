@@ -120,13 +120,13 @@ async function retryGeneration(row, button) {
 // but also enforced here defensively for rows saved before that cap existed.
 const MAX_DISPLAYED_EXAMPLES = 3;
 
-/** Every stored example plus a legacy fallback for rows saved before `examples` existed. */
+/**
+ * Every stored example. `examples` is the single source of truth — the
+ * example_furigana/translation columns this used to fall back to were dropped
+ * once the one row still relying on them had been backfilled into the array.
+ */
 function examplesOf(row) {
-  if (Array.isArray(row.examples) && row.examples.length) return row.examples;
-  if (row.example_furigana) {
-    return [{ furigana: row.example_furigana, translation: row.translation }];
-  }
-  return [];
+  return Array.isArray(row.examples) ? row.examples : [];
 }
 
 /**
@@ -264,7 +264,17 @@ function renderCustomVocabTable(rows) {
 
     const kanjiCell = document.createElement("td");
     kanjiCell.setAttribute("data-label", "Kanji");
-    kanjiCell.textContent = row.kanji || "-";
+    // kanji_usually_kana hides the kanji without deleting it. The row still
+    // carries 苺 for いちご — it's used for generating and matching example
+    // sentences, and untick the box on the edit form to show it here. The
+    // tooltip keeps it discoverable rather than making it feel absent.
+    if (row.kanji && row.kanji_usually_kana) {
+      kanjiCell.textContent = "–";
+      kanjiCell.title = `Usually written in kana. Kanji on record: ${row.kanji}`;
+      kanjiCell.className = "kanji-hidden";
+    } else {
+      kanjiCell.textContent = row.kanji || "-";
+    }
     tr.appendChild(kanjiCell);
 
     const englishCell = document.createElement("td");
@@ -325,6 +335,37 @@ function renderCustomVocabTable(rows) {
 // isn't retried on every poll tick for as long as the tab stays open.
 const annotationAttempted = new Set();
 
+// Two bracket groups touching — "苺[いちご][いちご]" — which correct bracket
+// syntax never produces, because the annotator attaches one reading per kanji
+// run and would merge two adjacent runs. So this is an unambiguous signature of
+// text that has been through the tagger twice.
+const DOUBLE_ANNOTATED_RE = /\]\[/;
+
+/**
+ * Annotates text exactly once, whatever state it arrives in.
+ *
+ * Three cases, and getting them confused is what produced
+ * "苺[いちご][いちご]が食[しょく][た]べたい。" on screen:
+ *
+ *   - Plain text (what the background generator stores): annotate it.
+ *   - Already correct bracket syntax: LEAVE IT. Dictionary-pulled sentences
+ *     carry the corpus's own authoritative readings, and re-deriving them with
+ *     kuromoji could quietly change a reading that was right.
+ *   - Double-annotated: strip every bracket group back to plain and annotate
+ *     that. furiganaToPlain() removes all of them, so the corrupted string
+ *     recovers to the same plain text it started from, and this repairs rows
+ *     already damaged rather than only preventing new ones.
+ */
+function annotateOnce(text, tagger) {
+  if (!text) return text;
+  if (DOUBLE_ANNOTATED_RE.test(text)) {
+    return annotateWithFurigana(furiganaToPlain(text), tagger);
+  }
+  // Any bracket group at all means it has been annotated already.
+  if (furiganaToPlain(text) !== text) return text;
+  return annotateWithFurigana(text, tagger);
+}
+
 // One Supabase write per row, so a user who adds twenty words in a sitting
 // shouldn't get twenty simultaneous round trips the first time they open this
 // page. The rest are picked up on the next load or the next poll tick, which
@@ -348,12 +389,23 @@ function rowsNeedingFurigana(rows) {
   return rows
     .filter(
       (row) =>
-        row.needs_furigana &&
+        (row.needs_furigana || isCorrupted(row)) &&
         row.example_status !== "pending" &&
         !annotationAttempted.has(String(row.id)) &&
-        examplesOf(row).length > 0,
+        (examplesOf(row).length > 0 || (row.more || []).length > 0),
     )
     .slice(0, MAX_ANNOTATIONS_PER_PASS);
+}
+
+/**
+ * Rows damaged by the double-annotation bug carry no flag — needs_furigana was
+ * cleared by the very write that corrupted them — so they'd never be picked up
+ * for repair on the flag alone. Detecting the damage directly is what makes
+ * annotateOnce()'s repair branch reachable for rows that already exist.
+ */
+function isCorrupted(row) {
+  const all = examplesOf(row).concat(Array.isArray(row.more) ? row.more : []);
+  return all.some((ex) => DOUBLE_ANNOTATED_RE.test(ex?.furigana || ""));
 }
 
 /**
@@ -389,7 +441,7 @@ async function upgradeFurigana(rows) {
     try {
       const annotate = (list) =>
         list.map((ex) => ({
-          furigana: annotateWithFurigana(ex.furigana || "", tagger),
+          furigana: annotateOnce(ex.furigana || "", tagger),
           translation: ex.translation || null,
         }));
       annotated = annotate(examplesOf(row));
@@ -404,8 +456,6 @@ async function upgradeFurigana(rows) {
       .update({
         examples: annotated,
         more: annotatedMore,
-        // Keeps mirroring examples[0], exactly as every other writer does.
-        example_furigana: annotated[0]?.furigana || null,
         needs_furigana: false,
       })
       .eq("id", row.id);

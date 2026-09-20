@@ -26,10 +26,18 @@ import { knownModels, resolveChain, shouldTryNextModel } from './models.js';
 
 export const JLPT_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 export const STYLES = ['sentence', 'phrase'];
+// How much kanji to use in the rest of the sentence. 'level' keeps every
+// sentence readable at the chosen JLPT level; 'natural' writes it the way a
+// native would. Defaults to 'level' — the safer choice for a learner, and
+// what the old ambiguous wording leaned towards.
+export const KANJI_POLICIES = ['level', 'natural'];
 const MIN_COUNT = 1;
 const MAX_COUNT = 5;
 // "More" mirrors verb_ready_final.csv exactly: always 2, not a user-chosen count.
 export const PHRASE_COUNT = 2;
+// How many sentences to ask for when nobody specified — matches MAX_EXAMPLES
+// on the client, which is the number a card can actually keep.
+const MAX_COUNT_DEFAULT = 3;
 const MAX_FIELD_LENGTH = 100;
 // `english` is NOT a word, it's a gloss list. add-vocab.html defaults to
 // recording ALL of a dictionary entry's meanings (see its senseSelect comment),
@@ -51,23 +59,41 @@ const JAPANESE_RE = /[぀-ヿ一-鿿]/;
 // Kanji only — narrower than JAPANESE_RE, used by containsTargetWord below.
 const KANJI_RE = /[々〆ヶ㐀-䶿一-鿿豈-﫿]/;
 
+const ITEM = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['japanese', 'english'],
+  properties: {
+    japanese: { type: 'string' },
+    english: { type: 'string' },
+  },
+};
+
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['examples'],
   properties: {
-    examples: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['japanese', 'english'],
-        properties: {
-          japanese: { type: 'string' },
-          english: { type: 'string' },
-        },
-      },
-    },
+    examples: { type: 'array', items: ITEM },
+  },
+};
+
+/**
+ * Both lists in one reply. Named `sentences`/`phrases` rather than reusing
+ * `examples` so the two can never be confused when they arrive together — they
+ * have different length rules and land in different columns.
+ *
+ * Both are `required`, so a provider honouring the schema cannot omit one. A
+ * provider that ignores schemas still can't cause damage: sanitizeList() checks
+ * each array independently and an absent one simply yields no phrases.
+ */
+const COMBINED_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sentences', 'phrases'],
+  properties: {
+    sentences: { type: 'array', items: ITEM },
+    phrases: { type: 'array', items: ITEM },
   },
 };
 
@@ -102,6 +128,10 @@ export function normalizeRequest(body) {
     .slice(0, MAX_COUNT);
 
   const instruction = normalizeInstruction(body.instruction);
+  // Whether the avoided items are being replaced (a rewrite) rather than kept
+  // (a top-up). Drives which avoid wording the prompt uses.
+  const replacing = body.replacing === true;
+  const kanjiPolicy = KANJI_POLICIES.includes(body.kanjiPolicy) ? body.kanjiPolicy : 'level';
 
   if (!hiragana || !english) {
     return { ok: false, message: 'Fill in the hiragana and English fields first.' };
@@ -121,7 +151,7 @@ export function normalizeRequest(body) {
 
   return {
     ok: true,
-    request: { hiragana, kanji, english, jlptLevel, style, count, avoid, instruction },
+    request: { hiragana, kanji, english, jlptLevel, style, count, avoid, instruction, replacing, kanjiPolicy },
   };
 }
 
@@ -203,14 +233,32 @@ const AMENDED_TARGET = { min: 10, max: 40 };
  * Assembles the prompt from PROMPTS. All wording lives in _lib/prompts.js;
  * this decides only which pieces apply and what fills their placeholders.
  */
-function buildPrompts({ hiragana, kanji, english, jlptLevel, style, count, avoid, instruction }) {
+function buildPrompts({ hiragana, kanji, english, jlptLevel, style, count, avoid, instruction, replacing, kanjiPolicy }) {
   const word = kanji || hiragana;
   const gloss = promptGloss(english);
 
   // Pre-rendered so the templates stay flat prose — see prompts.js.
   const reading = kanji ? ` (${hiragana})` : '';
+  // Ask for the spelling we can actually verify.
+  //
+  // With a kanji on record, containsTargetWord() accepts either spelling, so
+  // the model is told both are fine. WITHOUT one — a word stored before the
+  // kanji was kept, or a genuinely kana-only word — the kana is the only thing
+  // we can match, so it has to be requested explicitly. Leaving it open there
+  // is what produced "Gemini wrote sentences that don't actually use いちご"
+  // on three perfectly good sentences that all spelled it 苺.
+  const hasKanji = Boolean(kanji) && kanji !== hiragana;
+  const spellingNote = hasKanji
+    ? render(PROMPTS.spellingNote, { word: kanji, hiragana })
+    : render(PROMPTS.kanaOnlyNote, { hiragana });
+  // `replacing` says the avoided items are being THROWN AWAY, not merely kept
+  // alongside — a rewrite rather than a top-up. The wording differs sharply,
+  // because "these already exist" reads as background information while the
+  // user has actually just said "not this one", and models happily return the
+  // same sentence in reply to the former.
+  const avoidTemplate = replacing ? PROMPTS.avoidReplaced[style] : PROMPTS.avoid[style];
   const avoidClause = avoid.length
-    ? render(PROMPTS.avoid[style], { list: avoid.map((s) => `"${s}"`).join('; ') })
+    ? render(avoidTemplate, { list: avoid.map((s) => `"${s}"`).join('; ') })
     : '';
 
   // An amended sentence gets the wider bound, since the request itself may
@@ -237,11 +285,45 @@ function buildPrompts({ hiragana, kanji, english, jlptLevel, style, count, avoid
       level: jlptLevel,
       minChars: target.min,
       maxChars: target.max,
+      spellingNote,
+      kanjiPolicy: render(PROMPTS.kanjiPolicy[kanjiPolicy], { level: jlptLevel }),
     }) +
     avoidClause +
     amendmentSection;
 
   return { word, systemPrompt, userPrompt };
+}
+
+/**
+ * Prompt for the one-call-both-lists path. Shares promptGloss/spellingNote with
+ * buildPrompts() so a word reads identically whichever route generated it.
+ *
+ * No `avoid` clause and no amendment section: this only ever runs on a word
+ * being created, where by definition there is nothing yet to avoid and no
+ * per-sentence note to honour.
+ */
+function buildCombinedPrompts({ hiragana, kanji, english, jlptLevel, kanjiPolicy }) {
+  const word = kanji || hiragana;
+  const hasKanji = Boolean(kanji) && kanji !== hiragana;
+
+  return {
+    word,
+    systemPrompt: PROMPTS.combined.system,
+    userPrompt: render(PROMPTS.combined.task, {
+      word,
+      reading: hasKanji ? ` (${hiragana})` : '',
+      gloss: promptGloss(english),
+      level: jlptLevel,
+      sentenceCount: MAX_COUNT_DEFAULT,
+      phraseCount: PHRASE_COUNT,
+      minChars: SENTENCE_TARGET.min,
+      maxChars: SENTENCE_TARGET.max,
+      spellingNote: hasKanji
+        ? render(PROMPTS.spellingNote, { word: kanji, hiragana })
+        : render(PROMPTS.kanaOnlyNote, { hiragana }),
+      kanjiPolicy: render(PROMPTS.kanjiPolicy[kanjiPolicy], { level: jlptLevel }),
+    }),
+  };
 }
 
 /**
@@ -255,7 +337,7 @@ function buildPrompts({ hiragana, kanji, english, jlptLevel, style, count, avoid
  * @returns {Promise<{ ok: true, provider: string, examples: Array }
  *                 | { ok: false, status: number, code: string, message: string }>}
  */
-export async function runGeneration(env, userId, request, waitUntil) {
+async function callProvider(env, userId, { systemPrompt, userPrompt, schema }, waitUntil) {
   let key;
   try {
     key = await getActiveProviderKey(env, userId);
@@ -265,8 +347,6 @@ export async function runGeneration(env, userId, request, waitUntil) {
     }
     throw e;
   }
-
-  const { word, systemPrompt, userPrompt } = buildPrompts(request);
 
   // The chain is the user's chosen model (if any), then the registry's
   // cost/quota ordering, intersected with what the provider currently offers.
@@ -284,7 +364,7 @@ export async function runGeneration(env, userId, request, waitUntil) {
         model,
         systemPrompt,
         userPrompt,
-        schema: SCHEMA,
+        schema,
         signal: AbortSignal.timeout(45000),
       });
     } catch (e) {
@@ -328,31 +408,121 @@ export async function runGeneration(env, userId, request, waitUntil) {
     };
   }
 
-  const { examples, rejections } = sanitizeExamples(result.data, word, request.hiragana, request.style);
+  // `model` travels back so the client can say which one actually answered —
+  // after a fallback that differs from what the user selected, and silently
+  // switching models on someone is exactly the kind of thing that makes output
+  // quality look randomly variable.
+  return {
+    ok: true,
+    data: result.data,
+    provider: key.provider.id,
+    label: key.provider.label,
+    model: usedModel,
+  };
+}
+
+/** One style (sentences OR phrases) in one call. */
+export async function runGeneration(env, userId, request, waitUntil) {
+  const { word, systemPrompt, userPrompt } = buildPrompts(request);
+
+  const call = await callProvider(env, userId, { systemPrompt, userPrompt, schema: SCHEMA }, waitUntil);
+  if (!call.ok) return call;
+
+  const list = Array.isArray(call.data?.examples) ? call.data.examples : null;
+  const { examples, rejections } = sanitizeList(list, word, request.hiragana, request.style);
+
   if (examples.length === 0) {
-    // The rejection tally is the whole point of this log line. "No usable
-    // examples" collapses six genuinely different failures into one sentence,
-    // and without knowing WHICH filter fired, the only way to debug a report
-    // of it is to guess.
-    console.error(
-      `[generate:${key.provider.id}] all examples dropped by sanitizeExamples`,
-      `word=${word} hiragana=${request.hiragana} style=${request.style}`,
-      `rejections=${JSON.stringify(rejections)}`,
-      JSON.stringify(result.data).slice(0, 500),
-    );
+    logDropped(call, word, request, request.style, rejections);
     return {
       ok: false,
       status: 502,
       code: 'generation_failed',
-      message: describeRejections(rejections, key.provider.label, word),
+      message: describeRejections(rejections, call.label, word),
     };
   }
 
-  // `model` is reported back so the client can say which one actually answered
-  // — after a fallback, that differs from what the user selected, and silently
-  // switching models on someone is exactly the kind of thing that makes output
-  // quality look randomly variable.
-  return { ok: true, provider: key.provider.id, model: usedModel, examples };
+  return { ok: true, provider: call.provider, model: call.model, examples };
+}
+
+/**
+ * BOTH styles in ONE call.
+ *
+ * Every provider call costs a request against the user's quota, and on Google's
+ * free tier that is the binding constraint — a word generated as two calls
+ * (sentences, then phrases) burned twice the daily allowance for one word. The
+ * model is perfectly capable of returning both lists in a single structured
+ * reply, so creating a word now does exactly that.
+ *
+ * Only used when CREATING. Rewriting an existing word regenerates one section
+ * at a time, because then the user is targeting a specific thing and a combined
+ * call would throw away the half they were happy with.
+ *
+ * The phrases are OPTIONAL: `more` is an optional field on the form, so phrases
+ * failing their own sanitising must not fail the word. Sentences failing does.
+ */
+export async function runCombinedGeneration(env, userId, request, waitUntil) {
+  const { word, systemPrompt, userPrompt } = buildCombinedPrompts(request);
+
+  const call = await callProvider(
+    env,
+    userId,
+    { systemPrompt, userPrompt, schema: COMBINED_SCHEMA },
+    waitUntil,
+  );
+  if (!call.ok) return call;
+
+  const sentences = sanitizeList(
+    Array.isArray(call.data?.sentences) ? call.data.sentences : null,
+    word,
+    request.hiragana,
+    'sentence',
+  );
+  const phrases = sanitizeList(
+    Array.isArray(call.data?.phrases) ? call.data.phrases : null,
+    word,
+    request.hiragana,
+    'phrase',
+  );
+
+  if (sentences.examples.length === 0) {
+    logDropped(call, word, request, 'combined:sentences', sentences.rejections);
+    return {
+      ok: false,
+      status: 502,
+      code: 'generation_failed',
+      message: describeRejections(sentences.rejections, call.label, word),
+    };
+  }
+
+  if (phrases.examples.length === 0) {
+    // Logged, never surfaced — the word is complete without them.
+    console.error(
+      `[generate:${call.provider}] combined reply had no usable phrases`,
+      `word=${word} rejections=${JSON.stringify(phrases.rejections)}`,
+    );
+  }
+
+  return {
+    ok: true,
+    provider: call.provider,
+    model: call.model,
+    examples: sentences.examples,
+    phrases: phrases.examples,
+  };
+}
+
+/**
+ * The rejection tally is the whole point of this log line. "No usable examples"
+ * collapses six genuinely different failures into one sentence, and without
+ * knowing WHICH filter fired the only way to debug a report of it is to guess.
+ */
+function logDropped(call, word, request, styleLabel, rejections) {
+  console.error(
+    `[generate:${call.provider}] all examples dropped by sanitizeExamples`,
+    `word=${word} hiragana=${request.hiragana} style=${styleLabel}`,
+    `rejections=${JSON.stringify(rejections)}`,
+    JSON.stringify(call.data).slice(0, 500),
+  );
 }
 
 /**
@@ -370,9 +540,13 @@ function describeRejections(rejections, label, word) {
     case 'malformed_response':
       return `${label} replied in an unexpected format. Try again in a moment.`;
     case 'missing_target_word':
+      // No longer suggests ticking "usually written in kana" — that box is now
+      // a display preference and has no effect on generation. Both spellings
+      // are accepted, so reaching this genuinely means the model wandered off
+      // the word rather than merely spelling it the other way.
       return (
-        `${label} wrote sentences that don't actually contain ${word}. ` +
-        `If ${word} is usually written in kana, tick "usually written in kana" and try again.`
+        `${label} wrote sentences that don't actually use ${word}. ` +
+        `Try again, or check the Kanji and Hiragana fields are both correct for this word.`
       );
     case 'too_long':
       return `${label} wrote sentences that were too long to use. Try again, or a lower JLPT level.`;
@@ -396,10 +570,11 @@ function describeRejections(rejections, label, word) {
  * characters" instruction and writes a full sentence anyway should be caught
  * here, not silently accepted just because it's valid Japanese.
  */
-function sanitizeExamples(data, word, hiragana, style) {
-  if (!data || !Array.isArray(data.examples)) {
+function sanitizeList(items, word, hiragana, style) {
+  if (!Array.isArray(items)) {
     return { examples: [], rejections: { malformed_response: 1 } };
   }
+  const data = { examples: items };
 
   const maxJapanese = style === 'phrase' ? 30 : 200;
   const maxEnglish = style === 'phrase' ? 60 : 400;

@@ -50,17 +50,100 @@ export const PROMPTS = {
   task: {
     sentence:
       'Write {count} natural Japanese example sentences using the word {word}{reading} — meaning "{gloss}". ' +
-      'Use JLPT {level} level grammar and vocabulary, and use kanji where it is natural for that level. ' +
+      'Use JLPT {level} level grammar and vocabulary. ' +
       'Each sentence should be roughly {minChars}-{maxChars} characters long, with enough context to show ' +
-      'how the word is actually used. Give a natural English translation for each.',
+      'how the word is actually used. Give a natural English translation for each.{kanjiPolicy}{spellingNote}',
 
     phrase:
       'Write {count} very short Japanese phrases (roughly 5-10 characters each, NOT full sentences) ' +
       'each showing a different minimal, typical context where the word {word}{reading} — meaning ' +
       '"{gloss}" — is actually used, such as a short verb phrase with an object, or the word paired ' +
       'with a common noun. Use JLPT {level} level vocabulary. Give a short English gloss for each ' +
-      '(a few words, not a full sentence).',
+      '(a few words, not a full sentence).{kanjiPolicy}{spellingNote}',
   },
+
+  // How much kanji to use in the REST of the sentence — a real choice, not a
+  // detail. A learner reading at N5 and a learner who wants to see real written
+  // Japanese want opposite things, and the old wording ("use kanji where it is
+  // natural for that level") tried to mean both at once and so meant neither.
+  //
+  // Scoped to "the other words" on purpose: how the TARGET word itself is
+  // spelled is settled separately by spellingNote/kanaOnlyNote, and those two
+  // instructions would otherwise contradict each other for a word like 苺 that
+  // sits outside the JLPT lists entirely.
+  kanjiPolicy: {
+    level:
+      ' For the other words in the sentence, use kanji only where a learner at JLPT {level} would be ' +
+      'expected to read it, and write anything above that level in kana. The learner should be able to ' +
+      'read the whole sentence unaided.',
+    natural:
+      ' For the other words in the sentence, use kanji wherever a native writer normally would, even ' +
+      'where that is well above JLPT {level}. The sentence should look like real written Japanese ' +
+      'rather than a textbook exercise.',
+  },
+
+  // BOTH lists in ONE request, used when a word is first created.
+  //
+  // Every provider call costs one request against the user's quota, and on a
+  // free tier that is the binding constraint — asking for sentences and then
+  // phrases spent two of a small daily allowance on a single word.
+  //
+  // The two styles are genuinely different tasks, so they are spelled out
+  // separately and at length rather than blurred into "write some examples":
+  // the failure mode of a combined prompt is five items of identical shape.
+  // That's why the length contrast is stated inside each list AND again after
+  // them.
+  //
+  // COMBINED_SCHEMA in examples.js already forces the two top-level keys for
+  // providers that honour schemas; the closing sentence repeats it in prose
+  // for any that treat a schema as advisory.
+  combined: {
+    system:
+      'You are a Japanese teacher preparing a vocabulary card for a language learner. ' +
+      'Return plain Japanese text only — no furigana, no ruby markup, no romaji, no bracket annotations.',
+
+    task:
+      'For the word {word}{reading} — meaning "{gloss}" — write TWO separate things, both at ' +
+      'JLPT {level} level.\n\n' +
+      '1. "sentences": {sentenceCount} natural Japanese example sentences, each roughly ' +
+      '{minChars}-{maxChars} characters, with enough context to show how the word is actually ' +
+      'used. Give a natural English translation for each.\n\n' +
+      '2. "phrases": {phraseCount} VERY short Japanese phrases, roughly 5-10 characters each and ' +
+      'definitely NOT full sentences — a short verb phrase with an object, or the word paired with ' +
+      'a common noun. Give a short English gloss for each (a few words, not a full sentence).\n\n' +
+      'The phrases must be much shorter than the sentences, and neither list should repeat the ' +
+      'other. Return exactly two top-level lists, named "sentences" and "phrases", where every item ' +
+      'has a "japanese" field and an "english" field.{kanjiPolicy}{spellingNote}',
+  },
+
+  // Appended whenever the word has both a kanji and a kana spelling.
+  //
+  // The model must NOT be pushed toward one spelling. Gemini writes いちご as 苺
+  // and that is correct Japanese; the previous behaviour discarded the kanji,
+  // told the model the word was "いちご", and then rejected every sentence it
+  // wrote because the checker had no kanji to match on. Saying plainly that
+  // either spelling is acceptable removes the pressure in both directions —
+  // and the server-side check now accepts both, so whichever it picks is fine.
+  spellingNote:
+    ' The word may be written either in kanji as {word} or in kana as {hiragana} — both are correct, ' +
+    'so use whichever spelling is most natural in each sentence. Conjugate it freely as the grammar ' +
+    'requires; it does not need to appear in its dictionary form.',
+
+  // Used INSTEAD of spellingNote when no kanji is on record for the word.
+  //
+  // This exists because of a real failure: for a row storing only いちご, the
+  // model wrote 庭で赤い苺をたくさん収穫しました。— flawless Japanese — and
+  // every sentence was thrown away, because the only thing the checker could
+  // match on was the kana and the sentences contained none of it.
+  //
+  // We can only verify the spelling we hold, so we have to ASK for it rather
+  // than leave the choice open. Note this is a weaker position than having the
+  // kanji: the right repair for such a word is to restore its kanji on the edit
+  // form, after which spellingNote applies and either spelling is welcome.
+  kanaOnlyNote:
+    ' Write the word itself in kana as {hiragana} in every sentence. Do not substitute a kanji ' +
+    'spelling for it, even if a kanji spelling exists. Conjugate it freely as the grammar requires; ' +
+    'it does not need to appear in its dictionary form.',
 
   // ---------------------------------------------------------------------
   // Appended when the caller already holds text it wants kept. Without it the
@@ -74,6 +157,27 @@ export const PROMPTS = {
     phrase:
       ' These phrases already exist for this word — do not repeat or closely rephrase any of them; ' +
       'write something meaningfully different in structure or context: {list}.',
+  },
+
+  // Used INSTEAD of `avoid` when the listed items are the ones being THROWN
+  // AWAY — a single card's rewrite, or "rewrite all".
+  //
+  // "These already exist, don't repeat them" is the wrong thing to say when the
+  // user has just pressed a button meaning "not this one". It reads as
+  // background information rather than as the actual request, and models
+  // routinely hand back the same sentence. This version states the rejection,
+  // and names the specific axes to vary — without that, "something different"
+  // tends to produce the same sentence with one particle changed.
+  avoidReplaced: {
+    sentence:
+      ' IMPORTANT: the learner has just REJECTED the following example sentences and asked for ' +
+      'replacements. Do not reproduce any of them, and do not merely reword, re-conjugate or lightly ' +
+      'edit them. Each new sentence must differ in SITUATION, in the other vocabulary it uses, and in ' +
+      'sentence structure: {list}.',
+    phrase:
+      ' IMPORTANT: the learner has just REJECTED the following phrases and asked for replacements. Do ' +
+      'not reproduce any of them, and do not merely reword or lightly edit them. Each new phrase must ' +
+      'pair the word with a different noun or verb and describe a different situation: {list}.',
   },
 
   // ---------------------------------------------------------------------

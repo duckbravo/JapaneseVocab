@@ -621,7 +621,7 @@ function setGuestState(isGuest) {
 async function loadVocabPrefs() {
   const { data, error } = await supabaseClient
     .from("user_preferences")
-    .select("jlpt_level")
+    .select("jlpt_level, kanji_policy")
     .eq("user_id", settingsSession.user.id)
     .maybeSingle();
 
@@ -630,22 +630,27 @@ async function loadVocabPrefs() {
     return;
   }
 
-  const select = document.getElementById("jlptLevelPref");
-  if (data?.jlpt_level) select.value = data.jlpt_level;
+  if (data?.jlpt_level) document.getElementById("jlptLevelPref").value = data.jlpt_level;
+  if (data?.kanji_policy) document.getElementById("kanjiPolicyPref").value = data.kanji_policy;
 }
 
-async function saveJlptLevelPref(value) {
+/**
+ * One writer for both fields in this section — an upsert with a single column
+ * would be fine, but naming the column at each call site is how the two grow
+ * apart.
+ */
+async function saveVocabPref(column, value) {
   const msg = document.getElementById("vocabPrefsMsg");
   const { error } = await supabaseClient
     .from("user_preferences")
     .upsert(
-      { user_id: settingsSession.user.id, jlpt_level: value, updated_at: new Date().toISOString() },
+      { user_id: settingsSession.user.id, [column]: value, updated_at: new Date().toISOString() },
       { onConflict: "user_id" },
     );
 
-  msg.textContent = error ? "Couldn't save that — try again." : "";
+  msg.textContent = error ? "Couldn't save that — try again." : "Saved.";
   msg.classList.toggle("auth-success", !error);
-  if (error) console.error("Failed to save jlpt_level:", error);
+  if (error) console.error(`Failed to save ${column}:`, error);
 }
 
 document.addEventListener("auth-state-changed", async (e) => {
@@ -673,7 +678,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("activeProviderSelect")?.addEventListener("change", (e) => {
     handleActiveProviderChange(e.target.value);
   });
+  document.getElementById("kanjiPolicyPref")?.addEventListener("change", (e) => {
+    saveVocabPref("kanji_policy", e.target.value);
+  });
+
   document.getElementById("jlptLevelPref")?.addEventListener("change", (e) => {
-    saveJlptLevelPref(e.target.value);
+    saveVocabPref("jlpt_level", e.target.value);
   });
 });

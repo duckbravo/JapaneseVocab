@@ -33,6 +33,20 @@ with zero tooling.
   write as an asset change, reloads, writes more state, and loops forever: 609
   reloads in two minutes, with every request timing out. Moving the state
   outside the watched tree is what breaks the cycle.
+  **But not into the temp directory either.** That state holds the simulated
+  `LLM_KEYS` namespace, i.e. the user's encrypted API key. It used to live in
+  `%TEMP%` / `$TMPDIR`, which Windows Storage Sense, Disk Cleanup, and most
+  Unix `/tmp` reboot policies all delete on a schedule — so the key vanished
+  and had to be re-entered, a symptom that never appears on the deployed site
+  because real Cloudflare KV is never cleaned. It is now
+  `%LOCALAPPDATA%\japanesevocab\wrangler-state` /
+  `${XDG_STATE_HOME:-~/.local/state}/japanesevocab/wrangler-state`: outside the
+  watched tree, and not auto-cleaned. Both dev scripts migrate the old
+  directory across on first run.
+  If a key still disappears, the store is not the only suspect — the KV entry
+  is `llm-keys:<supabase-user-id>`, so signing in locally with a *different*
+  account looks identical to a wiped store. Check which account the sidebar
+  shows before assuming persistence broke.
   This is the canonical local server because it runs `worker.js` (and the
   `functions/` modules it imports) as well as serving the static files; a plain
   static server (Live Server, `python -m http.server`) still works for the
@@ -138,10 +152,36 @@ Shared modules and their responsibilities:
   goes through the single `saveWord()` writer, which is **idempotent**: after a
   successful insert it adopts the new id as `editingId`, so a step-2 choice
   that fails *after* saving (a missing AI key) leaves the user free to pick a
-  different option without creating a duplicate word. `?id=` (edit) opens
-  straight on step 3. `#jlptLevel` (step 2) and `#jlptLevelReview` (step 3) are
-  one setting mirrored into two controls — edit mode never shows step 2 and the
-  fast paths never show step 3, so neither alone serves every flow.
+  different option without creating a duplicate word.
+  **`?id=` (edit) is NOT a wizard** — `applyEditLayout()` adds `.is-editing`,
+  reveals steps 1 and 3 together, forces both `<details>` open, and hides the
+  progress bar and step navigation. A wizard asks a sequence of questions you
+  haven't answered yet; when editing they're all answered, and walking three
+  screens to fix one translation was the complaint that produced this. It's a
+  layout MODE over the same markup, not a second set of fields — one save path,
+  one example renderer, nothing to drift. `goToStep()` returns early while
+  editing, so the existing navigation wiring goes inert rather than needing
+  removal. Apply it from the URL in `DOMContentLoaded`, not after `loadForEdit()`
+  resolves, or the wizard flashes first.
+  Step 2 is dropped entirely when editing (it only asks how sentences should
+  *first* be written). **Replacing a sentence is a per-card action**, not a bulk
+  one — each card carries 📖 Dictionary and 🔄 AI rewrite, because wanting a
+  different second example is no reason to discard the first and third. The
+  shared toolbar only ever ADDS (`📖 Add from dictionary`, `✨ Top up`,
+  `✏️ Add one`).
+  `fetchDictionarySentences()` stashes the WHOLE corpus pool in
+  `dictionarySentences`; `pullDictionarySentences()` is the separate
+  fill-empty-slots-only auto-pull. Keep them apart — the old combined version
+  truncated the stash to the free slots, so with the list already full the pool
+  came back empty and per-card replacement had nothing to offer.
+  `nextDictionarySentence()` prefers a sentence **not already in the list**,
+  then falls back to dictionary order via a rotating cursor. Every current
+  example counts as used, *including the card being replaced*: excluding it
+  makes that card's own sentence the first "unused" candidate, so 📖 silently
+  replaces D2 with D2 while an unused D4 sits in the pool.
+  `#jlptLevel` (step 2) and `#jlptLevelReview` (step 3) are one setting mirrored
+  into two controls — edit mode never shows step 2 and the fast paths never show
+  step 3, so neither alone serves every flow.
 - `js/account-settings.js` — the bring-your-own-LLM-key UI on
   `account-settings.html`. Classic script; talks to the Worker's `/api/*`
   routes (handlers under `functions/api/`) rather than to Supabase directly.
@@ -180,6 +220,26 @@ scripts, and why `window.supabaseClient` bridging exists at all.
   words (keyed by the same `Kanji || Hiragana` string used for audio
   filenames) and custom words (keyed by `custom_vocab.id`), distinguished
   by `word_type`.
+- **`custom_vocab.examples` is the single source of truth for example
+  sentences.** It used to be mirrored into `example_furigana` + `translation`,
+  which three separate writers each had to remember to keep in sync. Those
+  columns were dropped in `20260920070000` after the one row predating the
+  array was backfilled. The comment in `20260816000000_ai_vocab.sql` justifying
+  the mirror named three readers; two of them were **already wrong** by the
+  time it was checked — `my-saved-words.js` never read `custom_vocab` at all
+  (its `translation` comes from the curated CSV), and `examplesOf()` had long
+  preferred the array. Don't reintroduce a denormalised copy: if a reader wants
+  "the first example", read `examples->0`.
+- **Schema-level invariants live in triggers, not in callers.**
+  `20260920030000` added `set_updated_at()` on `custom_vocab` and
+  `user_preferences`, so `updated_at` is right regardless of which client
+  wrote the row. Prefer this shape for anything every writer would otherwise
+  have to remember.
+- **RLS policies must wrap auth calls: `(select auth.uid())`, never bare
+  `auth.uid()`.** Bare calls are re-evaluated per candidate row; the
+  sub-select is hoisted into a once-per-statement InitPlan. All 15 policies
+  were converted in `20260920020000` after Supabase's linter flagged them
+  (`0003_auth_rls_initplan`). Write new policies the same way.
 - **Currently a single shared Supabase project** (`osckijyshkdlribqmtrk`)
   backs both local dev and the live site — `.dev.vars` and the committed
   `js/supabase-client.js` point at the identical URL/anon key. Separate
@@ -297,6 +357,67 @@ together:
   furigana, so keeping it would save un-annotated text as authoritative and
   lose the ruby permanently.
 
+**One provider call per word when CREATING — `runCombinedGeneration()`.** Every
+call spends one request of the user's daily quota, and on a free tier that is
+the binding constraint, so example sentences and the short "More" phrases come
+back from a single structured reply (`COMBINED_SCHEMA`: two top-level lists,
+`sentences` and `phrases`). This used to be two calls, which halved how many
+words a day were possible for no benefit. Both creation paths use it — the
+background route always, and the foreground one via `withPhrases: true` on
+`POST /api/generate-examples`.
+
+**Rewriting is deliberately NOT combined.** When the user targets one section,
+a combined call would throw away the half they were happy with. So: per-card
+📖/🔄 replace one sentence, `#rewriteAllBtn` rewrites all the sentences in one
+call (one request instead of three), and the More section regenerates on its
+own. Phrase outcomes stay independent of sentence outcomes — `more` is optional,
+so no usable phrases must never red-flag a word whose sentences are fine.
+
+**Kanji density in generated text is the user's choice, not a guess.**
+`kanjiPolicy` is `'level'` (kanji only where a learner at the chosen JLPT level
+would read it, everything above that in kana) or `'natural'` (kanji wherever a
+native writer would, however far above the level). It defaults to `'level'` and
+applies to sentences, phrases and the combined create call alike. The old
+wording — "use kanji where it is natural for that level" — tried to mean both
+at once and so meant neither; don't reintroduce a blended phrasing.
+`PROMPTS.kanjiPolicy` is deliberately scoped to **"the other words in the
+sentence"**, because how the TARGET word is spelled is settled separately by
+`spellingNote`/`kanaOnlyNote` and the two would otherwise contradict each other
+for a word like 苺 that sits outside the JLPT lists. Each example card also carries its **own** kanji dropdown, overriding the
+section for that sentence's 🔄 rewrite — same "undefined means follow the
+section" rule as its per-card JLPT level, refreshed by
+`refreshExampleOverrides()` and persisted alongside `level` inside `examples[]`
+(jsonb, no migration). The control is mirrored
+across step 2 and the Examples section by `syncMirroredControl('kanji', …)`,
+and stored in `user_preferences.kanji_policy` — set it on
+`account-settings.html` next to the default JLPT level, or on Add Vocab, which
+**writes it back**.
+
+That write-back is the asymmetry with `jlpt_level`, which Add Vocab reads but
+never saves: the level is a genuine per-word override (stored on the row as
+`custom_vocab.jlpt_level`, and per example inside `examples[]`), whereas kanji
+policy has no per-word storage anywhere, so a change made on Add Vocab would
+simply be lost. It started in `localStorage`, which made it per-browser — set
+it on the laptop and the phone still generated textbook sentences.
+
+**Regenerating must put the REJECTED text in `avoid`, with `replacing: true`.**
+Three separate bugs made rewriting return the same sentences: the per-card
+rewrite excluded the very sentence being replaced from `avoid` (so the only one
+the model wasn't told to avoid was the one the user rejected); "rewrite all"
+cleared `examples` *before* building `avoid`, sending an empty list; and the
+wording — "these example sentences already exist for this word" — reads as
+background information rather than as a request. `replacing: true` switches the
+prompt to `PROMPTS.avoidReplaced`, which states the rejection outright and names
+the axes that must vary (situation, surrounding vocabulary, structure);
+"write something different" alone gets the same sentence with one particle
+changed. Top-ups keep the original wording, because there the listed items
+genuinely are being kept.
+
+`sanitizeList(items, word, hiragana, style)` takes a bare array so the combined
+reply's two lists can be checked under their own rules — the phrase cap is 30
+characters against the sentence cap of 200, which is what stops a model
+returning five items of identical shape from passing as both.
+
 **Every LLM prompt lives in `functions/api/_lib/prompts.js` — put new ones
 there, not inline.** It's plain data (template strings with `{placeholders}`,
 filled by its own `render()`), so wording can be tuned without reading
@@ -333,6 +454,45 @@ them. Conversely the PROMPT gets only the primary sense (`promptGloss()`, first
 `"; "` segment): the card should be honest about covering every meaning, but a
 model told 屋台 means "cart; festival float; stage prop; framework; house"
 scatters its sentences across all five.
+
+**Never discard the kanji for a "usually written in kana" word.** JMdict tags
+いちご as usually-kana, and the form used to respond by clearing the kanji field
+and storing `kanji = null`. That broke generation outright: the model was told
+the word was いちご with no kanji, wrote the perfectly correct 苺が食べたい。,
+and `containsTargetWord()` rejected every sentence because the only thing it
+had to match on was kana. The tag is a frequency observation, not a claim the
+kanji is wrong. `kanji` is now always stored; `custom_vocab.kanji_usually_kana`
+records the tag as a **display preference** (hides the Kanji column on My Vocab,
+tooltip still names it, untick on the edit form to reveal).
+
+**Ask the model for the spelling you can verify.** `containsTargetWord()` can
+only match on what the row holds, so `buildPrompts()` picks between two mutually
+exclusive notes:
+- kanji on record → `PROMPTS.spellingNote`: either spelling is fine, and the
+  checker accepts either.
+- no kanji on record → `PROMPTS.kanaOnlyNote`: write the word in kana, don't
+  substitute a kanji spelling. Leaving the choice open here is what killed three
+  perfect sentences for いちご — the model wrote 苺 and the checker had only the
+  kana stem いち to match.
+
+Rows saved before the kanji was kept store `kanji = null` and cannot recover it
+from the row alone, so they're stuck on the weaker kana-only path. `loadForEdit`
+prefills the dictionary search with `jisho_slug` and shows a hint, making
+"Back → Search" the one-click repair that restores the kanji.
+
+**Furigana annotation must be idempotent — `annotateOnce()` in
+`js/custom-vocab.js`.** `needs_furigana` is one row-level flag describing two
+independently-written arrays (`examples` and `more`), and `queue-examples.js`
+sets it whenever *either* is written. When the sentences call fails but the
+phrases call succeeds, `examples` still holds the correctly-annotated
+dictionary sentences — annotating them again produced
+`苺[いちご][いちご]が食[しょく][た]べたい。` on screen (kuromoji re-read the
+orphaned 食 as しょく). So: plain text gets annotated; text already carrying
+brackets is left alone (dictionary readings are authoritative and must not be
+re-derived); text matching `/\]\[/` — a signature correct syntax never produces
+— is stripped back with `furiganaToPlain()` and re-annotated, which also
+repairs rows already damaged. `rowsNeedingFurigana()` picks up corrupted rows
+by that signature, since the write that corrupted them also cleared their flag.
 
 **`containsTargetWord()` is a "did the model ignore us entirely" guard, not a
 grammar check — keep it loose.** It has been too strict twice, and both times

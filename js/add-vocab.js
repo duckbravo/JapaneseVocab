@@ -43,6 +43,10 @@ let sentenceRequestId = 0;
 // state from `examples` made going to the review step and back permanently
 // disable it.
 let dictionarySentences = [];
+// Rotates only once every pooled sentence is already in the list, so repeated
+// presses of a card's 📖 cycle through the corpus in its own order instead of
+// returning the same sentence forever. Reset whenever the pool is refetched.
+let dictionaryCursor = 0;
 let cachedTagger = null; // set once js/furigana.js's tagger has loaded
 
 // Which of the three wizard screens is showing. Purely presentational — no
@@ -109,11 +113,52 @@ function wordIsUsable() {
   );
 }
 
+// True once ?id= has loaded a word. Editing is ONE PAGE, not a wizard: a
+// wizard exists to ask a sequence of questions you haven't answered yet, and
+// when editing they're all already answered. Stepping through three screens to
+// fix one translation was the complaint.
+let isEditing = false;
+
+/**
+ * Switches the form from wizard to single-page editor.
+ *
+ * Deliberately a layout MODE over the same markup rather than a second set of
+ * fields: one save path, one example renderer, no chance of the two drifting
+ * apart the way hand-copied auth markup once did (see CLAUDE.md).
+ *
+ * Step 2 is dropped entirely. Everything on it answers "how should these first
+ * be written?", which is a creation-time question — and its one reusable
+ * control, the JLPT level, is already mirrored into step 3's extras by
+ * syncJlptControls().
+ */
+function applyEditLayout() {
+  isEditing = true;
+  document.getElementById("customVocabForm").classList.add("is-editing");
+
+  document.querySelectorAll(".wizard-step").forEach((section) => {
+    section.hidden = section.dataset.step === "2";
+  });
+
+  // Nothing is hidden behind a disclosure when editing — "where's the kanji?"
+  // shouldn't be a click. They stay toggleable, just not closed to begin with.
+  document.querySelectorAll(".wizard-details").forEach((d) => {
+    d.open = true;
+  });
+  document.getElementById("pageTitle").textContent = "Edit word";
+  document.querySelector('.wizard-step[data-step="1"] h2').textContent = "Word";
+  document.getElementById("reviewHeading").textContent = "Example sentences";
+}
+
 /**
  * Shows one step. Steps past 1 refuse to open without a usable word, so the
  * progress bar can't be used to skip the only genuinely required fields.
  */
 function goToStep(step, { force = false } = {}) {
+  // The editor shows everything at once; there is no step to go to. Guarding
+  // here rather than at every call site means the existing navigation wiring
+  // (progress bar, Back buttons) simply goes inert.
+  if (isEditing) return true;
+
   if (step > 1 && !force && !wordIsUsable()) {
     document.getElementById("step1Error").textContent =
       "Fill in the hiragana and English for this word first.";
@@ -148,7 +193,7 @@ function updateProgress() {
 function updateWordDetailsSummary() {
   const hiragana = document.getElementById("customHiragana").value.trim();
   const english = document.getElementById("customEnglish").value.trim();
-  const kanji = effectiveKanji();
+  const kanji = wordKanji();
   const el = document.getElementById("wordDetailsSummary");
   if (!hiragana && !english) {
     el.textContent = "— not filled in yet";
@@ -166,12 +211,75 @@ function updateWordDetailsSummary() {
  * never display step 3, so neither control alone can serve every flow. Ids
  * must be unique, so they're mirrored instead.
  */
-function syncJlptControls(from) {
-  const a = document.getElementById("jlptLevel");
-  const b = document.getElementById("jlptLevelReview");
-  if (from === "review") a.value = b.value;
-  else b.value = a.value;
+// Generation settings that appear in more than one section. Each section needs
+// its own control to be self-contained, but these are NOT several settings —
+// ids must be unique, so the copies are mirrored instead.
+//
+//   jlpt  — step 2 (create), the Examples section, the More section
+//   kanji — step 2 and the Examples section (the More section inherits it;
+//           one line of prose there beats a fourth dropdown)
+const MIRRORED_CONTROLS = {
+  jlpt: ["jlptLevel", "jlptLevelExamples", "jlptLevelReview"],
+  kanji: ["kanjiPolicy", "kanjiPolicyExamples"],
+};
+
+/** Copies the value of whichever control changed to its mirrors. */
+function syncMirroredControl(group, fromId) {
+  const ids = MIRRORED_CONTROLS[group];
+  const source = document.getElementById(fromId) || document.getElementById(ids[0]);
+  if (!source) return;
+
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && el !== source) el.value = source.value;
+  });
+
+  // Cards that haven't been individually overridden follow the section value,
+  // so they have to move with it — otherwise changing the setting visibly does
+  // nothing to the cards already on screen.
+  if (group === "kanji") refreshExampleKanji();
+}
+
+/** Back-compat wrapper: the JLPT group additionally refreshes the card levels. */
+function syncJlptControls(fromId) {
+  syncMirroredControl("jlpt", fromId);
   refreshExampleLevels();
+}
+
+/** How much kanji AI-written sentences should use: "level" or "natural". */
+function kanjiPolicy() {
+  return document.getElementById("kanjiPolicyExamples")?.value
+    || document.getElementById("kanjiPolicy")?.value
+    || "level";
+}
+
+/**
+ * Persists the choice to user_preferences.kanji_policy.
+ *
+ * NOTE the asymmetry with the JLPT level, which this page reads but never
+ * writes back: the level is a genuine per-word override, stored on the row as
+ * custom_vocab.jlpt_level and per example. Kanji policy has no per-word
+ * storage anywhere, so a change made here would simply be lost — saving is the
+ * only way it survives the page.
+ *
+ * Fire-and-forget. A failed write must not block generation; the worst case is
+ * the setting not sticking, which the next change can fix.
+ */
+async function saveKanjiPolicy() {
+  if (!session) return;
+
+  const { error } = await supabaseClient
+    .from("user_preferences")
+    .upsert(
+      {
+        user_id: session.user.id,
+        kanji_policy: kanjiPolicy(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+
+  if (error) console.error("Failed to save kanji_policy:", error);
 }
 
 /**
@@ -185,11 +293,38 @@ function syncJlptControls(from) {
  * broken.
  */
 function refreshExampleLevels() {
+  refreshExampleOverrides("level", ".example-level-select", jlptLevel);
+}
+
+/** The same rule for the per-card kanji-use control. */
+function refreshExampleKanji() {
+  refreshExampleOverrides("kanjiPolicy", ".example-kanji-select", kanjiPolicy);
+}
+
+/**
+ * Re-points every card that hasn't been individually overridden at the new
+ * section-wide value.
+ *
+ * @param {string} field the property on the example that records an override
+ * @param {string} selector the control inside the card
+ * @param {Function} current reads the section-wide value
+ */
+function refreshExampleOverrides(field, selector, current) {
+  const value = current();
   document.querySelectorAll("#examplesList .example-card").forEach((card, i) => {
-    if (examples[i]?.level) return; // explicitly overridden — leave it alone
-    const select = card.querySelector(".example-level-select");
-    if (select) select.value = jlptLevel();
+    if (examples[i]?.[field]) return; // explicitly overridden — leave it alone
+    const select = card.querySelector(selector);
+    if (select) select.value = value;
   });
+}
+
+/**
+ * The level for example sentences. Reads the Examples section's own control,
+ * which the sync keeps equal to the others — so this is the same value as
+ * jlptLevel(), just read from the place the user set it.
+ */
+function jlptLevelForExamples() {
+  return document.getElementById("jlptLevelExamples")?.value || jlptLevel();
 }
 
 function jlptLevel() {
@@ -409,7 +544,7 @@ function applySense(senseIndex) {
   const kanaOnly = noKanjiForm || kanaTagged;
 
   // Fill the kanji box even when defaulting to "usually kana" — the box's
-  // content and the checkbox are independent (see setKanaOnly/effectiveKanji
+  // content and the checkbox are independent (see setKanaOnly/wordKanji
   // below), so the user can just untick to use it instead of retyping it.
   setKanaOnly(kanaOnly, form0.word || "");
   setKanaOnlyHint(
@@ -436,22 +571,48 @@ function applySense(senseIndex) {
 // kanjiValue explicitly (a fresh jisho selection or loading an edit) — never
 // as a side effect of the checkbox changing. That's what lets the user flip
 // the checkbox back and forth without losing whatever kanji was there.
+// The checkbox is a DISPLAY preference, not a data filter. It used to disable
+// the kanji input and cause the kanji to be dropped on save; that cost real
+// functionality — see kanjiUsuallyKana() below — so the input now stays
+// editable and the kanji is always kept.
 function setKanaOnly(checked, kanjiValue) {
   const checkbox = document.getElementById("kanaOnly");
   const kanjiInput = document.getElementById("customKanji");
   checkbox.checked = checked;
-  kanjiInput.disabled = checked;
   if (kanjiValue !== undefined) kanjiInput.value = kanjiValue;
 }
 
-// The box may hold kanji text while "usually kana" is ticked (see above), so
-// its raw .value no longer means "the kanji to use" by itself — the checkbox
-// is the actual source of truth for that. Every place that needs "this
-// word's kanji, or none" (saving, example generation) should read this
-// instead of the input directly.
-function effectiveKanji() {
-  if (document.getElementById("kanaOnly").checked) return "";
+/**
+ * The kanji to store and to generate from — ALWAYS whatever is in the box,
+ * regardless of the "usually written in kana" checkbox.
+ *
+ * This function used to return "" when that box was ticked, and that was the
+ * cause of two separate user-visible failures:
+ *
+ *   - Generation became impossible for such words. The model was told the word
+ *     was いちご with no kanji, wrote the perfectly correct 苺が食べたい。, and
+ *     containsTargetWord() rejected it — it had only the kana stem いち to
+ *     match on and the sentence contains no kana form at all. Every sentence
+ *     got thrown away and the user saw "Gemini wrote sentences that don't
+ *     actually contain いちご".
+ *   - The learner never saw the kanji. JMdict's "usually written using kana
+ *     alone" is a frequency observation, not a claim that the kanji is wrong;
+ *     苺 is common enough on menus that recognising it is worth something.
+ *
+ * Whether to SHOW it is a separate question, answered by kanjiUsuallyKana().
+ */
+function wordKanji() {
   return document.getElementById("customKanji").value.trim();
+}
+
+/**
+ * Whether the dictionary considers this word usually-kana. Stored as
+ * custom_vocab.kanji_usually_kana and used only to hide the Kanji column on My
+ * Vocab; unticking it on the edit form reveals the kanji that was there all
+ * along.
+ */
+function kanjiUsuallyKana() {
+  return document.getElementById("kanaOnly").checked;
 }
 
 async function performJishoSearch() {
@@ -574,8 +735,16 @@ function refreshExampleFurigana(card, plain, ready) {
  * sentence, since "ate" doesn't look like "eat"). See
  * functions/api/sentences.js.
  */
-async function pullDictionarySentences(word) {
-  if (!word || examples.length >= MAX_EXAMPLES) return;
+/**
+ * Fetches the corpus pool for `word` into `dictionarySentences`.
+ *
+ * Stashes the WHOLE pool, not just what happens to fit. The previous version
+ * truncated to the free slots, which meant that with the example list already
+ * full the stash came back empty — and per-card replacement, which needs
+ * alternatives to offer, had nothing to work with.
+ */
+async function fetchDictionarySentences(word) {
+  if (!word) return [];
 
   // A late response for a word the user has already navigated away from must
   // not land in the boxes.
@@ -599,38 +768,130 @@ async function pullDictionarySentences(word) {
       sentencePullSettled = true;
       updateDictionaryChoice();
     }
-    return;
+    return [];
   }
 
-  if (requestId !== sentenceRequestId) return; // superseded
+  if (requestId !== sentenceRequestId) return []; // superseded
 
   sentencePullSettled = true;
-
-  const room = MAX_EXAMPLES - examples.length;
-  if (room <= 0 || pulled.length === 0) {
-    status.textContent = pulled.length === 0 ? "No ready-made sentences for this word — try Generate." : "";
-    updateDictionaryChoice();
-    return;
-  }
-
-  dictionarySentences = pulled.slice(0, room).map((s) => ({
+  dictionarySentences = pulled.map((s) => ({
     plain: s.japanese,
     english: s.english || "",
     furigana: s.furigana || null,
     source: "dictionary",
   }));
+  dictionaryCursor = 0;
 
-  // Copies, so editing one in the form doesn't mutate the stash the "use the
-  // dictionary's sentences" card would restore.
-  examples = examples.concat(dictionarySentences.map((s) => ({ ...s })));
-  renderExamples();
   updateDictionaryChoice();
-  status.textContent = "";
+  status.textContent = dictionarySentences.length
+    ? ""
+    : "No ready-made sentences for this word — try Generate.";
+  return dictionarySentences;
 }
 
-/** How many sentences the dictionary had for this word — see dictionarySentences. */
+/** Fetches the pool once per word, then reuses it. */
+async function ensureDictionaryPool() {
+  if (dictionarySentences.length) return dictionarySentences;
+  const word = wordKanji() || document.getElementById("customHiragana").value.trim();
+  return fetchDictionarySentences(word);
+}
+
+/**
+ * The next corpus sentence to offer.
+ *
+ * Prefers one NOT already in the list, so pressing 📖 across cards walks
+ * through distinct sentences instead of pasting the same one everywhere. Once
+ * every pooled sentence is in use, it falls back to dictionary order via a
+ * rotating cursor, so pressing again cycles rather than sticking.
+ *
+ * EVERY current example counts as used — including the card being replaced.
+ * Excluding it (the first attempt at this) made that card's own sentence the
+ * first "unused" candidate, so pressing 📖 on a card already showing D2 quietly
+ * replaced D2 with D2 while a genuinely unused D4 sat in the pool.
+ */
+function nextDictionarySentence() {
+  if (dictionarySentences.length === 0) return null;
+
+  const used = new Set(examples.map((ex) => ex.plain));
+  const unused = dictionarySentences.find((s) => !used.has(s.plain));
+  if (unused) return { ...unused };
+
+  const s = dictionarySentences[dictionaryCursor % dictionarySentences.length];
+  dictionaryCursor++;
+  return { ...s };
+}
+
+/** Initial auto-pull: fills EMPTY slots only, never clobbering existing text. */
+async function pullDictionarySentences(word) {
+  if (!word || examples.length >= MAX_EXAMPLES) return;
+
+  const pool = await fetchDictionarySentences(word);
+  const room = MAX_EXAMPLES - examples.length;
+  if (room <= 0 || pool.length === 0) return;
+
+  // Copies, so editing one in the form doesn't mutate the stash.
+  examples = examples.concat(pool.slice(0, room).map((s) => ({ ...s })));
+  renderExamples();
+}
+
+/**
+ * How many dictionary sentences would actually be SAVED — the pool can now be
+ * larger than the list holds, and step 2's card promises what you'd get, not
+ * what exists.
+ */
 function dictionaryExampleCount() {
-  return dictionarySentences.length;
+  return Math.min(dictionarySentences.length, MAX_EXAMPLES);
+}
+
+/** Replaces one card with a corpus sentence, fetching the pool if needed. */
+async function replaceWithDictionary(index) {
+  const status = document.getElementById("generateStatus");
+  status.textContent = "";
+
+  setExamplesBusy(true);
+  try {
+    await ensureDictionaryPool();
+    const replacement = nextDictionarySentence();
+    if (!replacement) {
+      status.textContent = "The dictionary has no sentences for this word.";
+      return;
+    }
+    // Keeps its corpus furigana, which is authoritative and needs no tagger.
+    // `level`/`instruction` are dropped with the old sentence — they described
+    // text that is no longer here.
+    examples[index] = replacement;
+    updateExampleCard(index);
+  } finally {
+    setExamplesBusy(false);
+  }
+}
+
+/** Appends a corpus sentence the list doesn't already have. */
+async function addFromDictionary() {
+  const status = document.getElementById("generateStatus");
+  status.textContent = "";
+
+  // renderExamples() hides this button when the list is full, so this should be
+  // unreachable — but say so rather than returning silently if it ever isn't.
+  // A no-op with no explanation is exactly how this read as broken before.
+  if (examples.length >= MAX_EXAMPLES) {
+    status.textContent = `Already at ${MAX_EXAMPLES} sentences — use a card's 📖 to swap one out.`;
+    return;
+  }
+
+  setExamplesBusy(true);
+  try {
+    await ensureDictionaryPool();
+    const next = nextDictionarySentence();
+    if (!next) {
+      status.textContent = "The dictionary has no sentences for this word.";
+      return;
+    }
+    examples.push(next);
+    renderExamples();
+  } finally {
+    setExamplesBusy(false);
+  }
 }
 
 /**
@@ -692,6 +953,9 @@ function updateExampleCard(index) {
 function setExamplesBusy(busy) {
   document.getElementById("generateBtn").disabled = busy;
   document.getElementById("addManualBtn").disabled = busy;
+  // Also the dictionary add — a corpus fetch can take a second, and without
+  // this a second click during it would queue a duplicate.
+  document.getElementById("addFromDictionaryBtn").disabled = busy;
   document.querySelectorAll("#examplesList button").forEach((btn) => {
     btn.disabled = busy;
   });
@@ -721,9 +985,11 @@ function renderExamples() {
     englishInput.value = ex.english;
 
     // --- per-example tuning -------------------------------------------
-    // Both controls belong to THIS card. They exist because the two things a
-    // learner wants to change about one sentence are how hard it is and what
-    // it's about, and neither is worth rerolling the whole batch for.
+    // These controls belong to THIS card: how hard it is, how much kanji it
+    // uses, and what it's about. None is worth rerolling the whole batch for,
+    // and one sentence often wants different treatment from its neighbours —
+    // seeing 苺 written in kanji in one example while the rest stay readable
+    // is a reasonable thing to want.
     const tune = document.createElement("div");
     tune.className = "example-tune";
 
@@ -747,6 +1013,31 @@ function renderExamples() {
     });
     levelLabel.appendChild(levelSelect);
 
+    // Same "undefined means follow the section" rule as ex.level above.
+    // Option labels are terse because three controls share this row; the
+    // title carries the full wording used on the section-wide control.
+    const kanjiLabel = document.createElement("label");
+    kanjiLabel.className = "example-level";
+    kanjiLabel.append("Kanji");
+    const kanjiSelect = document.createElement("select");
+    kanjiSelect.className = "example-kanji-select";
+    [
+      ["level", "My level", "Only kanji for my JLPT level"],
+      ["natural", "Native", "However a native would write it"],
+    ].forEach(([value, short, full]) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = short;
+      opt.title = full;
+      kanjiSelect.appendChild(opt);
+    });
+    kanjiSelect.value = ex.kanjiPolicy || kanjiPolicy();
+    kanjiSelect.title = "How much kanji this sentence should use when rewritten";
+    kanjiSelect.addEventListener("change", () => {
+      examples[i].kanjiPolicy = kanjiSelect.value;
+    });
+    kanjiLabel.appendChild(kanjiSelect);
+
     const instructionInput = document.createElement("input");
     instructionInput.type = "text";
     instructionInput.className = "example-instruction";
@@ -764,13 +1055,24 @@ function renderExamples() {
       }
     });
 
-    tune.append(levelLabel, instructionInput);
+    tune.append(levelLabel, kanjiLabel, instructionInput);
+
+    // Two ways to replace THIS sentence, mirroring the two sources a sentence
+    // can come from in the first place. Per-card rather than whole-list,
+    // because wanting a different second example is not a reason to throw away
+    // the first and third.
+    const dictionaryBtn = document.createElement("button");
+    dictionaryBtn.type = "button";
+    dictionaryBtn.className = "btn-secondary";
+    dictionaryBtn.textContent = "📖 Dictionary";
+    dictionaryBtn.title = "Replace this one with a real sentence from the dictionary";
+    dictionaryBtn.addEventListener("click", () => replaceWithDictionary(i));
 
     const regenerateBtn = document.createElement("button");
     regenerateBtn.type = "button";
     regenerateBtn.className = "btn-secondary";
-    regenerateBtn.textContent = "🔄 Rewrite";
-    regenerateBtn.title = "Replace just this example, using the level and note above";
+    regenerateBtn.textContent = "🔄 AI rewrite";
+    regenerateBtn.title = "Replace this one with AI, using the level and note above";
     regenerateBtn.addEventListener("click", () => regenerateSingleExample(i));
 
     const removeBtn = document.createElement("button");
@@ -784,7 +1086,7 @@ function renderExamples() {
 
     const actions = document.createElement("div");
     actions.className = "example-card-actions";
-    actions.append(regenerateBtn, removeBtn);
+    actions.append(dictionaryBtn, regenerateBtn, removeBtn);
 
     japaneseInput.addEventListener("input", () => {
       examples[i].plain = japaneseInput.value;
@@ -805,13 +1107,19 @@ function renderExamples() {
     refreshExampleFurigana(card, ex.plain, ex.furigana);
   });
 
-  // Generate tops up rather than replacing, so it's only useful with room left.
+  // EVERY button in this row only ADDS, so all three are useless once the list
+  // is full — and a visible button that does nothing is worse than no button.
+  // "Add from dictionary" was missing from this and stayed on screen doing
+  // nothing, which in edit mode (which normally opens with a full list) meant
+  // it appeared broken every time. To bring in a dictionary sentence when the
+  // list is full, use a card's own 📖 to replace one.
   const room = MAX_EXAMPLES - examples.length;
   const generateBtn = document.getElementById("generateBtn");
   generateBtn.style.display = room > 0 ? "" : "none";
   generateBtn.textContent =
     examples.length > 0 ? `✨ Generate ${room} more with AI` : "✨ Generate examples";
   document.getElementById("addManualBtn").style.display = room > 0 ? "" : "none";
+  document.getElementById("addFromDictionaryBtn").style.display = room > 0 ? "" : "none";
 }
 
 /**
@@ -821,11 +1129,35 @@ function renderExamples() {
  * automatically, and wiping those would defeat the point. Replacing one
  * specific example is what each card's 🔄 button does.
  */
-async function generateExamples() {
+/** AI text carries no furigana of its own; the tagger supplies it on save. */
+function asAiExample(ex, level) {
+  return {
+    plain: ex.japanese,
+    english: ex.english,
+    furigana: null,
+    source: "ai", // survives a change of meaning; only "dictionary" is swept
+    level,
+  };
+}
+
+/**
+ * Tops the example list up to MAX_EXAMPLES with AI-written sentences.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.withPhrases] ask for the short "More" phrases in the
+ *   SAME provider call and fill `more` with them. One call instead of two,
+ *   which matters because each call spends one request of the user's daily
+ *   quota — see runCombinedGeneration() server-side. Only used when creating a
+ *   word; rewriting regenerates one section at a time.
+ * @param {boolean} [opts.replaceAll] throw the current list away first, so the
+ *   whole set is rewritten together rather than topped up.
+ * @param {string} [opts.level] JLPT level to use instead of the page default.
+ */
+async function generateExamples({ withPhrases = false, replaceAll = false, level } = {}) {
   const hiragana = document.getElementById("customHiragana").value.trim();
-  const kanji = effectiveKanji();
+  const kanji = wordKanji();
   const english = document.getElementById("customEnglish").value.trim();
-  const jlptLevel = document.getElementById("jlptLevel").value;
+  const jlptLevel = level || jlptLevelForExamples();
   const status = document.getElementById("generateStatus");
 
   if (!hiragana || !english) {
@@ -833,31 +1165,56 @@ async function generateExamples() {
     return;
   }
 
+  // Captured BEFORE the list is cleared. Wiping first and then building the
+  // avoid list from `examples` produced an EMPTY one, so "rewrite all" asked
+  // the model to avoid nothing and it returned the same sentences — the whole
+  // reason rewriting felt like it did nothing.
+  const outgoing = replaceAll ? examples.map((ex) => ex.plain).filter(Boolean) : [];
+
+  if (replaceAll) {
+    examples = [];
+    renderExamples();
+  }
+
   const count = MAX_EXAMPLES - examples.length;
   if (count <= 0) return;
 
-  warmUpTagger(); // AI sentences have no furigana of their own; the tagger supplies it
+  warmUpTagger();
 
-  // Tell the model what's already in the list — including the pulled
-  // dictionary sentences — or it has no way to avoid near-duplicates.
-  const avoid = examples.map((ex) => ex.plain).filter(Boolean);
+  // Either what's being kept (top-up) or what's being discarded (rewrite).
+  // `replacing` tells the server which, so the prompt can say "the learner
+  // rejected these" rather than the much weaker "these already exist".
+  const avoid = replaceAll ? outgoing : examples.map((ex) => ex.plain).filter(Boolean);
 
   setExamplesBusy(true);
-  status.textContent = "Generating example sentences…";
+  status.textContent = withPhrases
+    ? "Writing example sentences and short phrases…"
+    : "Generating example sentences…";
 
   try {
     const { data } = await api("/api/generate-examples", {
       method: "POST",
-      body: { hiragana, kanji, english, jlptLevel, count, avoid },
+      body: { hiragana, kanji, english, jlptLevel, count, avoid, withPhrases, replacing: replaceAll, kanjiPolicy: kanjiPolicy() },
     });
 
-    const generated = (data.examples || []).map((ex) => ({
-      plain: ex.japanese,
-      english: ex.english,
-      furigana: null, // AI text has none; annotated by the tagger on save
-      source: "ai", // survives a change of meaning; only "dictionary" is swept
-    }));
+    const generated = (data.examples || []).map((ex) => asAiExample(ex, jlptLevel));
     examples = examples.concat(generated).slice(0, MAX_EXAMPLES);
+
+    // Only ever ADDS phrases, never clobbers: on the create path `more` is
+    // empty anyway, and anything the user typed is theirs.
+    if (withPhrases && Array.isArray(data.phrases)) {
+      const room = MAX_MORE - more.length;
+      if (room > 0) {
+        more = more.concat(
+          data.phrases.slice(0, room).map((ex) => ({
+            plain: ex.japanese,
+            english: ex.english,
+            furigana: null,
+          })),
+        );
+        renderMore();
+      }
+    }
 
     renderExamples();
     status.textContent = generated.length
@@ -868,6 +1225,24 @@ async function generateExamples() {
   } finally {
     setExamplesBusy(false);
   }
+}
+
+/**
+ * Rewrites EVERY example sentence in one call at the chosen level.
+ *
+ * One request instead of up to three individual 🔄 rewrites, which is the
+ * point: each call costs a slice of the user's daily quota. Confirms first,
+ * because unlike "Top up" this discards what's there — including anything
+ * hand-edited.
+ */
+async function rewriteAllExamples() {
+  if (
+    examples.length > 0 &&
+    !confirm(`Rewrite all ${examples.length} example sentences with AI? This can't be undone.`)
+  ) {
+    return;
+  }
+  await generateExamples({ replaceAll: true });
 }
 
 /**
@@ -883,10 +1258,11 @@ async function generateExamples() {
  */
 async function regenerateSingleExample(index) {
   const hiragana = document.getElementById("customHiragana").value.trim();
-  const kanji = effectiveKanji();
+  const kanji = wordKanji();
   const english = document.getElementById("customEnglish").value.trim();
   const level = examples[index]?.level || jlptLevel();
   const instruction = (examples[index]?.instruction || "").trim();
+  const policy = examples[index]?.kanjiPolicy || kanjiPolicy();
   const status = document.getElementById("generateStatus");
 
   if (!hiragana || !english) {
@@ -898,10 +1274,10 @@ async function regenerateSingleExample(index) {
 
   // Avoid every OTHER current example, so the replacement doesn't just repeat
   // one of the sentences still sitting in the batch.
-  const avoid = examples
-    .filter((_, i) => i !== index)
-    .map((ex) => ex.plain)
-    .filter(Boolean);
+  // INCLUDES the sentence being replaced. Excluding it — the original version
+  // — meant the one sentence the user had just rejected was the only one the
+  // model wasn't told to avoid, so "rewrite" frequently returned it verbatim.
+  const avoid = examples.map((ex) => ex.plain).filter(Boolean);
 
   setExamplesBusy(true);
   status.textContent = instruction ? "Rewriting this example…" : "Regenerating this example…";
@@ -909,7 +1285,7 @@ async function regenerateSingleExample(index) {
   try {
     const { data } = await api("/api/generate-examples", {
       method: "POST",
-      body: { hiragana, kanji, english, jlptLevel: level, count: 1, avoid, instruction },
+      body: { hiragana, kanji, english, jlptLevel: level, count: 1, avoid, instruction, replacing: true, kanjiPolicy: policy },
     });
 
     const [replacement] = data.examples || [];
@@ -931,6 +1307,7 @@ async function regenerateSingleExample(index) {
       source: "ai",
       level,
       instruction,
+      kanjiPolicy: policy,
     };
     updateExampleCard(index);
     status.textContent = "";
@@ -1053,7 +1430,7 @@ function renderMore() {
 /** Always replaces both phrases at once — there's no "add more" here, the shape is fixed at 2. */
 async function generateMorePhrases() {
   const hiragana = document.getElementById("customHiragana").value.trim();
-  const kanji = effectiveKanji();
+  const kanji = wordKanji();
   const english = document.getElementById("customEnglish").value.trim();
   const jlptLevel = document.getElementById("jlptLevel").value;
   const status = document.getElementById("generateMoreStatus");
@@ -1071,7 +1448,7 @@ async function generateMorePhrases() {
   try {
     const { data } = await api("/api/generate-examples", {
       method: "POST",
-      body: { hiragana, kanji, english, jlptLevel, style: "phrase" },
+      body: { hiragana, kanji, english, jlptLevel, style: "phrase", kanjiPolicy: kanjiPolicy() },
     });
 
     more = (data.examples || []).map((ex) => ({
@@ -1093,7 +1470,7 @@ async function generateMorePhrases() {
 /** Replaces a single "More" phrase in place, keeping the other one untouched. */
 async function regenerateSingleMorePhrase(index) {
   const hiragana = document.getElementById("customHiragana").value.trim();
-  const kanji = effectiveKanji();
+  const kanji = wordKanji();
   const english = document.getElementById("customEnglish").value.trim();
   const jlptLevel = document.getElementById("jlptLevel").value;
   const status = document.getElementById("generateMoreStatus");
@@ -1106,10 +1483,8 @@ async function regenerateSingleMorePhrase(index) {
   warmUpTagger();
 
   // Avoid the OTHER phrase, so the replacement isn't just a rephrasing of it.
-  const avoid = more
-    .filter((_, i) => i !== index)
-    .map((ex) => ex.plain)
-    .filter(Boolean);
+  // INCLUDES the phrase being replaced — see regenerateSingleExample().
+  const avoid = more.map((ex) => ex.plain).filter(Boolean);
 
   setMoreBusy(true);
   status.textContent = "Regenerating this phrase…";
@@ -1117,7 +1492,7 @@ async function regenerateSingleMorePhrase(index) {
   try {
     const { data } = await api("/api/generate-examples", {
       method: "POST",
-      body: { hiragana, kanji, english, jlptLevel, style: "phrase", count: 1, avoid },
+      body: { hiragana, kanji, english, jlptLevel, style: "phrase", count: 1, avoid, replacing: true, kanjiPolicy: kanjiPolicy() },
     });
 
     const [replacement] = data.examples || [];
@@ -1158,18 +1533,23 @@ function updateNotesPreview() {
 // JLPT level preference
 // ---------------------------------------------------------------------------
 
-async function loadJlptPreference() {
+/** Both generation defaults, in one round trip. Set on account-settings.html. */
+async function loadGenerationPreferences() {
   if (!session) return;
   const { data } = await supabaseClient
     .from("user_preferences")
-    .select("jlpt_level")
+    .select("jlpt_level, kanji_policy")
     .eq("user_id", session.user.id)
     .maybeSingle();
 
-  const select = document.getElementById("jlptLevel");
   if (data?.jlpt_level) {
-    select.value = data.jlpt_level;
-    syncJlptControls("main");
+    document.getElementById("jlptLevel").value = data.jlpt_level;
+    syncJlptControls("jlptLevel");
+  }
+
+  if (data?.kanji_policy) {
+    document.getElementById("kanjiPolicy").value = data.kanji_policy;
+    syncMirroredControl("kanji", "kanjiPolicy");
   }
 }
 
@@ -1186,20 +1566,15 @@ function examplesFromRow(row) {
       plain: furiganaToPlain(e.furigana || ""),
       english: e.translation || "",
       furigana: e.furigana || null,
-      // Absent on every row saved before per-example levels existed, which is
-      // correct: those cards fall back to the page-wide level.
+      // Absent on every row saved before per-example overrides existed, which
+      // is correct: those cards fall back to the section-wide value.
       level: e.level || undefined,
+      kanjiPolicy: e.kanjiPolicy || undefined,
     }));
   }
-  if (row.example_furigana) {
-    return [
-      {
-        plain: furiganaToPlain(row.example_furigana),
-        english: row.translation || "",
-        furigana: row.example_furigana,
-      },
-    ];
-  }
+  // No legacy fallback: `examples` is the single source of truth. The
+  // example_furigana/translation columns it used to read were dropped once the
+  // one row that still depended on them had been backfilled.
   return [];
 }
 
@@ -1225,7 +1600,9 @@ async function loadForEdit(id) {
   }
 
   document.getElementById("customHiragana").value = row.hiragana || "";
-  setKanaOnly(!row.kanji, row.kanji || "");
+  // `?? !row.kanji` covers rows saved before kanji_usually_kana existed, where
+  // a missing kanji was the only trace left of the box having been ticked.
+  setKanaOnly(row.kanji_usually_kana ?? !row.kanji, row.kanji || "");
   document.getElementById("customEnglish").value = row.english || "";
   document.getElementById("customNotes").value = row.notes_furigana || "";
   jishoSlug = row.jisho_slug || null;
@@ -1251,25 +1628,32 @@ async function loadForEdit(id) {
   renderMore();
   updateNotesPreview();
 
-  document.getElementById("pageTitle").textContent = "Edit word";
-  document.getElementById("formSubmitBtn").textContent = "Save";
+  document.getElementById("formSubmitBtn").textContent = "Save changes";
   document.getElementById("cancelEditBtn").style.display = "";
 
-  // A word already in the list has been through the choice once; asking again
-  // to fix a typo would be three screens of nothing. Land on review, and point
-  // Back at step 1 — re-looking-up the word is the only step that's still
-  // meaningful from here, whereas "how should these be written?" is not.
-  document.getElementById("step3BackBtn").dataset.goto = "1";
-  document.getElementById("reviewHeading").textContent = "Example sentences";
+  // Prefill the lookup so re-fetching this word from the dictionary is one
+  // click from step 1. That is the repair path for rows saved before the kanji
+  // was kept: they store kanji = null, which can't be recovered from the row
+  // itself, and without the kanji the generator can only be asked for the kana
+  // spelling (see PROMPTS.kanaOnlyNote).
+  document.getElementById("jishoSearchInput").value =
+    row.jisho_slug || row.kanji || row.hiragana || "";
+  if (!row.kanji) {
+    setKanaOnlyHint(
+      "No kanji is stored for this word. Go Back and press Search to fetch it " +
+        "from the dictionary — example sentences can then use either spelling.",
+    );
+  }
+
   if (row.jlpt_level) {
     document.getElementById("jlptLevel").value = row.jlpt_level;
-    syncJlptControls("main");
+    syncJlptControls("jlptLevel");
   }
   // A row the Worker generated in the background shows plain text until the
   // tagger has run; opening it for editing is a good moment to pay that off,
   // and saving will clear needs_furigana (see saveWord).
   if (row.needs_furigana) warmUpTagger();
-  goToStep(3, { force: true });
+  applyEditLayout();
 }
 
 // ---------------------------------------------------------------------------
@@ -1289,6 +1673,7 @@ async function annotateForSave(list) {
   const shape = (ex) => {
     const out = { furigana: ex.furigana, translation: ex.english.trim() };
     if (ex.level) out.level = ex.level;
+    if (ex.kanjiPolicy) out.kanjiPolicy = ex.kanjiPolicy;
     return out;
   };
 
@@ -1350,18 +1735,18 @@ async function saveWord(overrides = {}) {
 
   const storedExamples = await annotateForSave(examples);
   const storedMore = await annotateForSave(more);
-  const first = storedExamples[0] || {};
 
   const payload = {
     user_id: session.user.id,
     hiragana: document.getElementById("customHiragana").value.trim(),
-    kanji: effectiveKanji() || null,
+    kanji: wordKanji() || null,
+    // Kept even when the dictionary says the word is usually kana — this flag
+    // only controls whether My Vocab shows it.
+    kanji_usually_kana: kanjiUsuallyKana(),
     english: document.getElementById("customEnglish").value.trim(),
     examples: storedExamples,
     more: storedMore,
     pitch,
-    example_furigana: first.furigana || null,
-    translation: first.translation || null,
     notes_furigana: document.getElementById("customNotes").value.trim() || null,
     part_of_speech: partOfSpeech,
     jisho_slug: jishoSlug,
@@ -1410,7 +1795,9 @@ async function chooseDictionary() {
   // and its generated sentences are still sitting in `examples`. Restoring
   // from the stash is what makes coming back here a real second chance rather
   // than a save of whatever the last path happened to leave behind.
-  examples = dictionarySentences.map((s) => ({ ...s }));
+  // Capped: the stash now holds the WHOLE corpus pool, which can be longer
+  // than the list is allowed to keep.
+  examples = dictionarySentences.slice(0, MAX_EXAMPLES).map((s) => ({ ...s }));
   renderExamples();
 
   const result = await saveWord({ example_status: "ready", example_error: null });
@@ -1458,9 +1845,10 @@ async function chooseBackground() {
       body: {
         vocabId: result.id,
         hiragana: document.getElementById("customHiragana").value.trim(),
-        kanji: effectiveKanji(),
+        kanji: wordKanji(),
         english: document.getElementById("customEnglish").value.trim(),
         jlptLevel: level,
+        kanjiPolicy: kanjiPolicy(),
         count: MAX_EXAMPLES,
       },
     });
@@ -1494,9 +1882,12 @@ async function chooseReview() {
   examples = examples.filter((ex) => ex.source !== "dictionary");
   renderExamples();
 
-  // Reuses the same top-up generator step 3 uses, so what lands in the review
-  // list is identical to pressing "Top up" there.
-  await generateExamples();
+  // withPhrases: the short "More" phrases come back in the SAME provider call
+  // rather than costing a second one. Creating a word wants both, and every
+  // call spends a slice of the user's daily quota — see runCombinedGeneration()
+  // server-side. Rewriting later regenerates one section at a time, where the
+  // user is targeting something specific.
+  await generateExamples({ withPhrases: true });
 
   setStep2Busy(false);
 
@@ -1518,7 +1909,7 @@ function chooseManual() {
 }
 
 function payloadHeadword() {
-  return effectiveKanji() || document.getElementById("customHiragana").value.trim();
+  return wordKanji() || document.getElementById("customHiragana").value.trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -1599,8 +1990,17 @@ document.addEventListener("DOMContentLoaded", () => {
     setKanaOnlyHint(null); // the user just overrode whatever jisho suggested
   });
 
-  document.getElementById("generateBtn").addEventListener("click", generateExamples);
+  document.getElementById("generateBtn").addEventListener("click", () => generateExamples());
   document.getElementById("addManualBtn").addEventListener("click", addManualExample);
+  document.getElementById("addFromDictionaryBtn").addEventListener("click", addFromDictionary);
+  document.getElementById("rewriteAllBtn").addEventListener("click", rewriteAllExamples);
+  document.getElementById("jlptLevelExamples").addEventListener("change", () => syncJlptControls("jlptLevelExamples"));
+  ["kanjiPolicy", "kanjiPolicyExamples"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => {
+      syncMirroredControl("kanji", id);
+      saveKanjiPolicy();
+    });
+  });
 
   document.getElementById("generateMoreBtn").addEventListener("click", generateMorePhrases);
   document.getElementById("addManualMoreBtn").addEventListener("click", addManualMorePhrase);
@@ -1637,14 +2037,20 @@ document.addEventListener("DOMContentLoaded", () => {
     chooseManual();
   });
 
-  document.getElementById("jlptLevel").addEventListener("change", () => syncJlptControls("main"));
-  document.getElementById("jlptLevelReview").addEventListener("change", () => syncJlptControls("review"));
+  document.getElementById("jlptLevel").addEventListener("change", () => syncJlptControls("jlptLevel"));
+  document.getElementById("jlptLevelReview").addEventListener("change", () => syncJlptControls("jlptLevelReview"));
 
   updateNotesPreview();
   renderExamples();
   renderMore();
   updateDictionaryChoice();
-  goToStep(1, { force: true });
+
+  // Decide the layout from the URL, not from the loaded row. loadForEdit()
+  // waits on a Supabase round trip, and switching only after it returns shows
+  // a step-1 wizard for a moment first — which looks like the page changing
+  // its mind. Nothing in applyEditLayout() needs the row's data.
+  if (editingId) applyEditLayout();
+  else goToStep(1, { force: true });
 });
 
 document.addEventListener("auth-state-changed", async (e) => {
@@ -1656,6 +2062,6 @@ document.addEventListener("auth-state-changed", async (e) => {
   // TOKEN_REFRESHED re-dispatches this roughly hourly; only load once per session.
   if (!wasGuest) return;
 
-  await loadJlptPreference();
+  await loadGenerationPreferences();
   if (editingId) await loadForEdit(editingId);
 });

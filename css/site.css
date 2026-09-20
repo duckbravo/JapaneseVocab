@@ -467,6 +467,10 @@ tr:hover {
 .vocab-form-actions {
   display: flex;
   gap: 0.5rem;
+  /* The examples row now holds four actions (rewrite all / dictionary / top up
+     / add one). Without wrapping, the last one is pushed off the edge of the
+     card at ordinary widths rather than moving to a second line. */
+  flex-wrap: wrap;
 }
 
 .vocab-form-actions button {
@@ -1073,15 +1077,22 @@ button:disabled:hover {
   color: #666;
 }
 
-.example-tune .example-level-select {
+/* Both per-card dropdowns, together. Styling only one of them let the other
+   fall through to the general `.vocab-form select` rule (14px / 8px padding
+   against 12px / 4px), so the two sat at different heights and the row looked
+   misaligned by a few pixels. */
+.example-tune .example-level-select,
+.example-tune .example-kanji-select {
   padding: 4px 6px;
   font-size: 12px;
 }
 
-/* Takes the remaining width, but never narrower than a readable box — below
-   that the flex row wraps it onto its own line instead. */
+/* Its own full-width line, below the Level and Kanji dropdowns. With both of
+   those in the row there is no space left beside them for a usable text box,
+   and a free-text field squeezed to a few characters is worse than a second
+   line. (`1 1 100%` in a wrapping row = "take a whole line".) */
 .example-tune .example-instruction {
-  flex: 1 1 14rem;
+  flex: 1 1 100%;
   min-width: 0;
   font-size: 13px;
   padding: 6px 8px;
@@ -1099,8 +1110,8 @@ button:disabled:hover {
   }
 
   /* REQUIRED once the container becomes a column. flex-basis applies along the
-     MAIN axis, so the `flex: 1 1 14rem` above — meant as "14rem wide" in the
-     row layout — turns into "14rem TALL" here, rendering the note box as a
+     MAIN axis, so the `flex: 1 1 100%` above — meant as "a whole line wide" in
+     the row layout — would become "100% TALL" here, rendering the note box as a
      giant empty rectangle. */
   .example-tune .example-instruction {
     flex: 0 0 auto;
@@ -1119,6 +1130,13 @@ button:disabled:hover {
 
 .provider-row-model label {
   display: flex;
+  /* MUST be stated explicitly. `.settings-section label` above sets
+     `flex-direction: column` at the SAME specificity (0,1,1), so this rule only
+     overrides the properties it actually names — inheriting `column` by
+     omission put "Model" above the dropdown and, worse, turned the select's
+     main axis vertical, at which point the flex-basis below was read as a
+     HEIGHT and the control rendered as a ~450px box. */
+  flex-direction: row;
   align-items: center;
   gap: 0.5rem;
   font-size: 13px;
@@ -1133,22 +1151,129 @@ button:disabled:hover {
   border: 1px solid #ccc;
   border-radius: 4px;
   font-weight: normal;
-  /* Takes the width left over from the label, but wraps rather than shrinking
-     below something readable. */
-  flex: 1 1 12rem;
+  /* Sized to its longest option rather than stretched: no grow, free to shrink,
+     with a sensible preferred width. `flex-grow: 1` here would make the control
+     as wide as the whole settings card, which looks like a text field rather
+     than a dropdown. */
+  flex: 0 1 18rem;
   min-width: 0;
+  /* Belt and braces for the height: whatever the flex context ends up being,
+     a <select> should be one line tall. */
+  height: auto;
 }
 
 @media (max-width: 768px) {
+  /* Label above, full-width control — "Model" plus an 18rem dropdown doesn't
+     fit a phone row. */
   .provider-row-model label {
     align-items: stretch;
     flex-direction: column;
     gap: 0.25rem;
   }
 
-  /* flex-basis follows the main axis, which is now vertical — without this the
-     select renders 12rem TALL. */
+  /* The main axis is vertical here, so any flex-basis would be read as a
+     height. `auto` keeps the select one line tall; `align-items: stretch`
+     above gives it the full width. */
   .provider-row-model select {
     flex: 0 0 auto;
   }
+}
+
+/* A word whose kanji is on record but hidden because the dictionary calls it
+   usually-kana (custom_vocab.kanji_usually_kana). Muted rather than blank, so
+   it reads as "deliberately not shown" instead of "no kanji exists" — the
+   cell's tooltip names the kanji, and unticking the box on the edit form
+   brings it back for good. */
+.kanji-hidden {
+  color: #bbb;
+  cursor: help;
+}
+
+/* ============================================================
+   Edit layout (add-vocab.html?id=…)
+   ============================================================
+   Same markup as the create wizard, shown as ONE page. applyEditLayout() in
+   js/add-vocab.js adds .is-editing and reveals the sections; everything here
+   is about removing wizard chrome that stops making sense once there are no
+   steps to walk through. */
+
+/* No steps to navigate, so no step indicator. */
+.vocab-wizard.is-editing .wizard-progress {
+  display: none;
+}
+
+/* Step 1's whole nav row goes: "Next: examples" addresses a sequence that no
+   longer exists, and its Cancel link is duplicated by the one next to Save at
+   the bottom. Hiding the buttons individually would leave an empty row with
+   margins. Step 3's nav SURVIVES — it holds Save and Cancel — so only its Back
+   button is removed. */
+.vocab-wizard.is-editing .wizard-step[data-step="1"] .wizard-nav,
+.vocab-wizard.is-editing #step3BackBtn {
+  display: none;
+}
+
+/* Sections become visible bands on one page rather than separate screens. */
+.vocab-wizard.is-editing .wizard-step + .wizard-step {
+  border-top: 2px solid #eee;
+  padding-top: 1.25rem;
+  margin-top: 0.5rem;
+}
+
+/* The disclosures are forced open in edit mode, so their summaries now act as
+   plain section headings. The "— 食べる（たべる）· to eat" recap is redundant
+   when the fields themselves are right there. */
+.vocab-wizard.is-editing .wizard-details {
+  border: none;
+  padding: 0;
+}
+
+.vocab-wizard.is-editing .wizard-details > summary {
+  font-size: 1rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.vocab-wizard.is-editing .wizard-details > summary .wizard-summary-value {
+  display: none;
+}
+
+/* The save button is the end of the page, so give it weight. */
+.vocab-wizard.is-editing #formSubmitBtn {
+  padding: 12px 18px;
+  font-size: 16px;
+}
+
+/* The hint after a checkbox label belongs UNDER it, not beside it.
+   .checkbox-label forces `flex-direction: row`, which turned the explanatory
+   <small> into a third column floating to the right of the label text. */
+.checkbox-label {
+  flex-wrap: wrap;
+}
+
+.checkbox-label small {
+  /* Own row, indented past the checkbox so it reads as belonging to the label. */
+  flex-basis: 100%;
+  margin-left: calc(1rem + 0.5rem);
+}
+
+/* Button hierarchy in the edit layout.
+   `.vocab-form-actions button` paints every button blue, which beats
+   `.btn-secondary` on specificity (0,1,1 vs 0,1,0). On the create wizard that's
+   harmless — each screen has one or two. The edit page shows them all at once,
+   so four blue buttons ended up competing with the blue "Save changes" at the
+   bottom and nothing looked more important than anything else.
+   Scoped to .is-editing so the create flow is untouched. */
+.vocab-wizard.is-editing .vocab-form-actions button {
+  background-color: #f4f4f4;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+.vocab-wizard.is-editing .vocab-form-actions button:hover:not(:disabled) {
+  background-color: #e8e8e8;
+}
+
+/* Per-card actions are secondary to the card's own text, and there are now
+   three of them, so let the row wrap on a narrow card rather than squeezing. */
+.example-card-actions {
+  flex-wrap: wrap;
 }

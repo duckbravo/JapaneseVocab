@@ -113,9 +113,15 @@
           <input type="text" id="customKanji" />
         </label>
 
+        <!--
+          A DISPLAY preference, not a data filter. Ticking this no longer
+          discards the kanji — it is always saved, so example generation can
+          match either spelling and you can reveal it later by unticking here.
+        -->
         <label class="checkbox-label" for="kanaOnly">
           <input type="checkbox" id="kanaOnly" />
-          This word is usually written in kana, not kanji
+          Usually written in kana — hide the kanji in My Vocab
+          <small>(the kanji is still saved; untick any time to show it)</small>
         </label>
         <div id="kanaOnlyHint" class="settings-note" style="display: none;"></div>
 
@@ -190,6 +196,14 @@
         </select>
       </label>
 
+      <label for="kanjiPolicy" class="wizard-inline-field">
+        Kanji use
+        <select id="kanjiPolicy">
+          <option value="level">Only kanji for my JLPT level</option>
+          <option value="natural">However a native would write it</option>
+        </select>
+      </label>
+
       <p class="settings-note">
         No AI key yet? <a href="account-settings.html">Add one in Account Settings</a>,
         or <a href="#" id="choiceManual">write the sentences yourself</a>.
@@ -214,7 +228,40 @@
         🔄 to rewrite just that one. All of them show on My Vocab.
       </p>
 
+      <!--
+        Mirrors the "More examples" section below: a level, then the actions
+        that use it. Each example card also carries its OWN level override and
+        its own 📖 / 🔄 buttons, for changing one sentence without touching the
+        rest.
+      -->
+      <label for="jlptLevelExamples" class="wizard-inline-field">
+        JLPT level
+        <select id="jlptLevelExamples">
+          <option value="N5">N5 (beginner)</option>
+          <option value="N4">N4</option>
+          <option value="N3">N3</option>
+          <option value="N2">N2</option>
+          <option value="N1">N1 (advanced)</option>
+        </select>
+      </label>
+
+      <label for="kanjiPolicyExamples" class="wizard-inline-field">
+        Kanji use
+        <select id="kanjiPolicyExamples">
+          <option value="level">Only kanji for my JLPT level</option>
+          <option value="natural">However a native would write it</option>
+        </select>
+      </label>
+
+      <!--
+        "Rewrite all" is ONE provider call for the whole set, where pressing 🔄
+        on three cards would be three — and every call spends a slice of the
+        user's daily quota. It replaces rather than adds, so it confirms first;
+        the other three only ever add and hide themselves once the list is full.
+      -->
       <div class="vocab-form-actions">
+        <button type="button" id="rewriteAllBtn" class="btn-secondary">🔄 Rewrite all with AI</button>
+        <button type="button" id="addFromDictionaryBtn" class="btn-secondary">📖 Add from dictionary</button>
         <button type="button" id="generateBtn" class="btn-secondary">✨ Top up to 3</button>
         <button type="button" id="addManualBtn" class="btn-secondary">✏️ Add one</button>
       </div>
@@ -235,7 +282,8 @@
         <p class="settings-note">
           Two short phrases showing typical usage — e.g. "友達に会います — meet a
           friend" — rather than full sentences. Mirrors the "More" column on the
-          verb and i-adjective pages.
+          verb and i-adjective pages. Uses the same <strong>Kanji use</strong>
+          setting as the example sentences above.
         </p>
 
         <!--

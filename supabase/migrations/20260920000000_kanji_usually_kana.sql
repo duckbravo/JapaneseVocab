@@ -1,0 +1,31 @@
+-- Keep the kanji even when the dictionary says a word is "usually kana".
+--
+-- THE PROBLEM. JMdict marks いちご as "usually written using kana alone", so the
+-- Add Vocab form cleared the kanji field entirely and stored kanji = null. Two
+-- things went wrong as a result:
+--
+--   1. The learner never got to see 苺. The dictionary's tag is a statement
+--      about relative frequency, not about the kanji being wrong or unused —
+--      苺 is common enough on menus and packaging that a learner benefits from
+--      recognising it.
+--   2. Example generation broke outright. With no kanji stored, the model was
+--      told the word was "いちご" and nothing else; it wrote 苺が食べたい。
+--      (perfectly correct), and the server's own "does this sentence contain
+--      the target word?" check rejected every sentence, because the only thing
+--      it had to match on was the kana. The word was unusable.
+--
+-- THE FIX. `kanji` is now always stored when the dictionary has one. This
+-- column records the dictionary's opinion separately, as a DISPLAY preference:
+-- true hides the kanji column on My Vocab, while the value stays in the row for
+-- generation, matching, and for the user to reveal later by unticking the box
+-- on the edit form.
+--
+-- Defaults to false, so every existing row keeps showing whatever kanji it has.
+-- Rows saved before this migration that were stripped of their kanji stay
+-- stripped — re-save them from the edit form to pick the kanji back up.
+--
+-- There's no Supabase CLI linked to this repo — paste this into the target
+-- project's SQL Editor and run it. Additive only.
+
+alter table public.custom_vocab
+  add column if not exists kanji_usually_kana boolean not null default false;

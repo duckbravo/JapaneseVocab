@@ -23,7 +23,7 @@
 import { err, json, readJsonBody, BadRequest } from './_lib/http.js';
 import { assertKvBinding } from './_lib/kv.js';
 import { checkRateLimit } from './_lib/ratelimit.js';
-import { normalizeRequest, runGeneration, PHRASE_COUNT } from './_lib/examples.js';
+import { normalizeRequest, runCombinedGeneration } from './_lib/examples.js';
 import { bearerToken, patchRow } from './_lib/supabase-rest.js';
 
 export async function onRequestPost({ request, env, data, waitUntil }) {
@@ -64,10 +64,10 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
   return json({ ok: true, queued: true, vocabId }, 202);
 }
 
-/** runGeneration() shouldn't throw, but waitUntil() is no place to find out. */
-async function safely(env, userId, request, vocabId, label, waitUntil) {
-  return runGeneration(env, userId, request, waitUntil).catch((e) => {
-    console.error(`[queue-examples:${vocabId}] ${label} threw`, e?.stack || String(e));
+/** The generator shouldn't throw, but waitUntil() is no place to find out. */
+async function safely(env, userId, request, vocabId, waitUntil) {
+  return runCombinedGeneration(env, userId, request, waitUntil).catch((e) => {
+    console.error(`[queue-examples:${vocabId}] generation threw`, e?.stack || String(e));
     return { ok: false, message: 'Generation failed unexpectedly.' };
   });
 }
@@ -77,51 +77,37 @@ async function safely(env, userId, request, vocabId, label, waitUntil) {
  * to the caller, so every outcome — success, provider failure, database
  * failure — ends in either a written row or a console.error.
  *
- * TWO generations, not one. The "More" column (short usage phrases like
- * 友達に会います) is a genuinely different STYLE, not a slice of the same
- * output, so it needs its own call — see the 'phrase' branch in _lib/examples.js.
- * They run concurrently because they're independent and the user is waiting on
- * neither; the cost is two provider calls per backgrounded word.
+ * ONE generation, not two. The example sentences and the short "More" phrases
+ * are genuinely different styles, but a single structured reply can carry both
+ * lists — see runCombinedGeneration(). This used to be two concurrent calls,
+ * which doubled the quota cost of every backgrounded word for no benefit; on
+ * Google's free tier that halved how many words a day were possible.
  *
- * Their outcomes are handled INDEPENDENTLY. `more` is optional on the form and
- * optional here: failing to write two short phrases must not red-flag a word
- * whose actual example sentences came back fine, and conversely phrases that
- * did arrive are worth keeping even when the sentences failed.
+ * The two OUTCOMES are still independent. `more` is optional on the form and
+ * optional here: no usable phrases must not red-flag a word whose sentences
+ * came back fine.
  */
 async function generateInBackground(env, token, userId, vocabId, request, waitUntil) {
-  const [sentences, phrases] = await Promise.all([
-    safely(env, userId, { ...request, style: 'sentence' }, vocabId, 'sentences', waitUntil),
-    safely(env, userId, { ...request, style: 'phrase', count: PHRASE_COUNT }, vocabId, 'phrases', waitUntil),
-  ]);
+  const result = await safely(env, userId, request, vocabId, waitUntil);
 
   const patch = {
     jlpt_level: request.jlptLevel,
     updated_at: new Date().toISOString(),
   };
 
-  if (sentences.ok) {
-    const stored = toStored(sentences.examples);
-    const first = stored[0] || {};
-    patch.examples = stored;
-    // example_furigana/translation keep mirroring examples[0], exactly as
-    // js/add-vocab.js's save path does — my-saved-words.js and rows predating
-    // the `examples` column still read those two.
-    patch.example_furigana = first.furigana || null;
-    patch.translation = first.translation || null;
+  if (result.ok) {
+    patch.examples = toStored(result.examples);
     patch.example_status = 'ready';
     patch.example_error = null;
+    // Everything written here is PLAIN Japanese; kuromoji runs in the browser.
+    // js/custom-vocab.js annotates both arrays and clears this. Its
+    // annotateOnce() must stay idempotent — one flag describes two arrays.
     patch.needs_furigana = true;
+
+    if (result.phrases.length) patch.more = toStored(result.phrases);
   } else {
     patch.example_status = 'failed';
-    patch.example_error = sentences.message;
-  }
-
-  if (phrases.ok) {
-    patch.more = toStored(phrases.examples);
-    patch.needs_furigana = true;
-  } else {
-    // Deliberately not surfaced to the user: the word is complete without it.
-    console.error(`[queue-examples:${vocabId}] phrases unavailable: ${phrases.message}`);
+    patch.example_error = result.message;
   }
 
   const write = await patchRow(env, token, 'custom_vocab', vocabId, patch);

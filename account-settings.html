@@ -73,6 +73,20 @@
       <small>Used to pre-select the level when generating AI example sentences on the Add Vocab page. You can still change it per word.</small>
     </label>
 
+    <label for="kanjiPolicyPref">
+      Kanji in AI example sentences
+      <select id="kanjiPolicyPref">
+        <option value="level">Only kanji for my JLPT level</option>
+        <option value="natural">However a native would write it</option>
+      </select>
+      <small>
+        "My level" keeps every sentence readable at the level above — anything
+        harder is written in kana. "However a native would write it" produces
+        real written Japanese, which will include kanji you haven't met yet.
+        Changing it on the Add Vocab page saves it here too.
+      </small>
+    </label>
+
     <div id="vocabPrefsMsg" class="auth-error"></div>
   </section>
 

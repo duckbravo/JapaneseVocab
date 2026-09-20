@@ -54,6 +54,40 @@ echo
   fi
 ) >/dev/null 2>&1 &
 
+# Where the local KV lives.
+#
+# NOT /tmp. That is where this used to be, and most systems clear /tmp on
+# reboot (and macOS prunes it after a few days), which silently wipes the
+# simulated KV namespace and takes your saved LLM API key with it. The symptom
+# is "I have to re-enter my API key every time I start the dev server", and it
+# never happens on the deployed site because that uses real Cloudflare KV, which
+# nothing cleans.
+#
+# XDG_STATE_HOME is the standard location for exactly this kind of
+# persist-across-runs state, and is still OUTSIDE the repo - which matters,
+# because state inside the repo causes the endless reload loop described below.
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/japanesevocab/wrangler-state"
+OLD_STATE_DIR="${TMPDIR:-/tmp}/japanesevocab-wrangler-state"
+
+mkdir -p "$(dirname "$STATE_DIR")"
+
+# One-time migration, so a key saved under the old location survives the move.
+#
+# The test is "does the new location have KV DATA yet", NOT "does the directory
+# exist". Anything that starts wrangler at the new path - a manual
+# `wrangler dev --persist-to`, a tool, a crashed run - creates the directory
+# without any KV in it, and a directory-exists check then skips the migration
+# forever, silently stranding the key in the old store. That happened.
+#
+# COPY rather than move, so the old store stays as a backup.
+if [ ! -d "$STATE_DIR/v3/kv" ] && [ -d "$OLD_STATE_DIR/v3/kv" ]; then
+  echo "  Moving local dev state out of the temp folder so it stops being"
+  echo "  deleted. Your saved API key comes with it."
+  echo
+  mkdir -p "$STATE_DIR"
+  cp -a "$OLD_STATE_DIR/." "$STATE_DIR/"
+fi
+
 # Settings now come from wrangler.jsonc (name, main, assets, KV binding,
 # compatibility_date), so no flags are needed for those.
 #
@@ -67,5 +101,5 @@ echo
 exec npx --yes wrangler@latest dev \
   --port 8788 \
   --live-reload \
-  --persist-to "${TMPDIR:-/tmp}/japanesevocab-wrangler-state" \
+  --persist-to "$STATE_DIR" \
   "$@"

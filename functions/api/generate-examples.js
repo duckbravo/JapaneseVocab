@@ -20,7 +20,7 @@
 import { json, err, readJsonBody, BadRequest } from './_lib/http.js';
 import { assertKvBinding } from './_lib/kv.js';
 import { checkRateLimit } from './_lib/ratelimit.js';
-import { normalizeRequest, runGeneration } from './_lib/examples.js';
+import { normalizeRequest, runGeneration, runCombinedGeneration } from './_lib/examples.js';
 
 export async function onRequestPost({ request, env, data, waitUntil }) {
   assertKvBinding(env);
@@ -39,6 +39,23 @@ export async function onRequestPost({ request, env, data, waitUntil }) {
   const { allowed, retryAfter } = await checkRateLimit(env, data.user.id, 'generate');
   if (!allowed) {
     return err(429, 'rate_limited', `Too many generations — try again in ${retryAfter}s.`);
+  }
+
+  // `withPhrases` asks for the short "More" phrases in the SAME provider call.
+  // Used when creating a word, where both are wanted and a second call would
+  // double the quota cost. Rewriting an existing word leaves it off, so one
+  // section can be regenerated without disturbing the other.
+  if (body.withPhrases === true) {
+    const combined = await runCombinedGeneration(env, data.user.id, normalized.request, waitUntil);
+    if (!combined.ok) return err(combined.status, combined.code, combined.message);
+
+    return json({
+      ok: true,
+      provider: combined.provider,
+      model: combined.model,
+      examples: combined.examples,
+      phrases: combined.phrases,
+    });
   }
 
   const result = await runGeneration(env, data.user.id, normalized.request, waitUntil);
