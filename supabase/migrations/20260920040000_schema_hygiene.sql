@@ -44,6 +44,11 @@ end $$;
 -- fires as the auth system's own role. Revoking from anon/authenticated does
 -- not affect it. Verify anyway by completing one real signup afterwards — a
 -- broken trigger here means new accounts get no profiles row.
+-- BUG: this line is a NO-OP. See 20260920080000, which actually fixes it.
+-- anon/authenticated never hold a direct grant — EXECUTE is granted to PUBLIC
+-- by default and inherited — so revoking from them removes nothing. Left
+-- unchanged because it has already been applied; the follow-up migration
+-- revokes from PUBLIC.
 revoke execute on function public.handle_new_user() from anon, authenticated;
 
 comment on function public.handle_new_user() is
