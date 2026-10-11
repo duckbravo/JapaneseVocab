@@ -77,27 +77,11 @@ h1 {
   margin-bottom: 2rem;
 }
 
-table {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-  background-color: white;
-  box-shadow: 0 0 10px rgba(0,0,0,0.1);
-}
-
-th, td {
-  padding: 12px 16px;
-  text-align: left;
-  border-bottom: 1px solid #eee;
-  overflow-wrap: break-word;
-}
-
-th {
-  background-color: #f2f2f2;
-}
-
-tr:hover {
-  background-color: #f5f5f5;
+@media (max-width: 768px) {
+  /* 2rem a side leaves a 360px phone with under 300px for a vocab card. */
+  body {
+    padding: 1rem;
+  }
 }
 
 .play-btn {
@@ -143,8 +127,8 @@ tr:hover {
   display: none;
 }
 
-/* Stacked examples inside #customVocabTable's Example cell — one word can now
-   have several, mirroring how the verb page's More column stacks phrases. */
+/* Stacked examples in a My Vocab card's Examples section — one word can have
+   several, mirroring how the verb page's More section stacks phrases. */
 .example-entry {
   margin-bottom: 0.5em;
 }
@@ -193,11 +177,7 @@ tr:hover {
   border-right: 2px solid #c0392b;
 }
 
-.pitch-line {
-  margin-top: 0.25em;
-}
-
-/* #customVocabTable's More cell — up to 2 short phrases, one per line. */
+/* A My Vocab card's More section — up to 2 short phrases, one per line. */
 .more-entry {
   display: block;
   margin-bottom: 0.3em;
@@ -212,37 +192,272 @@ tr:hover {
   color: #777;
 }
 
-#vocabTable td:nth-child(1),
-#vocabTable td:nth-child(2) {
-  background-color: rgba(255, 117, 0, 0.2); /* Adjust transparency */
-  font-weight: bold; /* Make the text bold */
+/* ============================================================
+   Vocab cards (index, i-adjectives, my-saved-words, my-vocab)
+   ============================================================
+   Built by js/vocab-cards.js. One card per word: a summary row that's always
+   visible, and a details panel toggled open by tapping the row.
+
+   Wide screens: the summary rows share one grid template with the header row
+   above them, so the cards line up like table columns and a list can be
+   scanned top to bottom. Phones: the word and its reading share a line, the
+   English sits underneath, and the buttons stay at the right edge where the
+   thumb is. */
+
+.vocab-cards {
+  /* Hiragana | Kanji | English | buttons. The button column is a fixed width
+     rather than `auto` because each card is its own grid — `auto` would size
+     every card independently and the columns would drift out of line. */
+  --vocab-cols: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr) 8.5rem;
 }
-#vocabTable td:nth-child(3) {
-  background-color: rgba(255, 234, 0, 0.2); /* Highlight color (light cyan) */
+
+.vocab-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 1em;
+}
+
+.vocab-list-header,
+.vocab-card-summary {
+  display: grid;
+  grid-template-columns: var(--vocab-cols);
+  column-gap: 1rem;
+  align-items: center;
+  padding: 0.6rem 1rem;
+}
+
+.vocab-list-header {
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  padding-top: 0;
+  padding-bottom: 0.35rem;
+  /* + the card's 4px accent border and 1px right border, so the labels sit
+     exactly over the columns they name. */
+  padding-left: calc(1rem + 5px);
+  padding-right: calc(1rem + 1px);
+}
+
+.vocab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vocab-card {
+  background: white;
+  border: 1px solid #e6e6e6;
+  border-left: 4px solid transparent;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.vocab-card.is-open {
+  border-left-color: #007bff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.vocab-card-summary {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.vocab-card-summary:hover {
+  background-color: #fafbfc;
+}
+
+.vocab-card-field {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.vocab-card-hiragana,
+.vocab-card-kanji {
+  font-size: 1.1rem;
   font-weight: bold;
 }
 
-@media (max-width: 768px) {
-  table, thead, tbody, th, td, tr {
-    display: block;
-  }
+.vocab-card-english {
+  color: #444;
+}
 
-  th {
+.vocab-card-actions {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.vocab-card-toggle {
+  cursor: pointer;
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  width: 2rem;
+  height: 2rem;
+  font-size: 14px;
+  color: #666;
+  transition: transform 0.2s ease;
+}
+
+.vocab-card-toggle:hover {
+  border-color: #007bff;
+  color: #007bff;
+}
+
+.vocab-card.is-open .vocab-card-toggle {
+  transform: rotate(180deg);
+}
+
+/* Visible on a collapsed card, so a failed background job can't hide. */
+.vocab-card-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.badge-pending { color: #6a5300; background: #fff8e6; }
+.badge-failed  { color: #8a1f1f; background: #fdecec; }
+
+.vocab-card.row-failed {
+  border-left-color: #d64545;
+}
+
+/* REQUIRED, same reason as .wizard-step[hidden]: the display rule below
+   would otherwise beat the browser's [hidden] { display: none }. */
+.vocab-card-details[hidden] {
+  display: none;
+}
+
+.vocab-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid #f0f0f0;
+}
+
+.vocab-detail {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  column-gap: 1rem;
+}
+
+.vocab-detail-label {
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  padding-top: 0.2em;
+}
+
+.vocab-detail-body {
+  overflow-wrap: break-word;
+  line-height: 1.7; /* room for the <rt> furigana above each line */
+}
+
+.vocab-detail-none {
+  margin: 0;
+  color: #999;
+  font-size: 14px;
+}
+
+.vocab-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vocab-detail-actions .btn-danger {
+  padding: 6px 12px;
+}
+
+.vocab-list-empty {
+  text-align: center;
+  color: #777;
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem 1rem;
+  margin: 0;
+}
+
+/* Pagination can be dozens of page buttons — let them wrap on a phone instead
+   of pushing the page sideways. (The element's inline style sets display:flex
+   but not wrapping, so this still applies.) */
+#paginationControls {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .vocab-list-header {
     display: none;
   }
 
-  td {
-    position: relative;
-    padding-left: 50%;
-    border: none;
-    border-bottom: 1px solid #eee;
+  /* 食べる  たべる       [▶][☆][▾]
+     to eat                           */
+  .vocab-card-summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "kanji hiragana actions"
+      "english english english";
+    column-gap: 0.6rem;
+    row-gap: 0.2rem;
+    padding: 0.65rem 0.75rem;
   }
 
-  td::before {
-    content: attr(data-label);
-    position: absolute;
-    left: 16px;
+  .vocab-card-kanji    { grid-area: kanji; font-size: 1.25rem; }
+  .vocab-card-hiragana { grid-area: hiragana; font-size: 0.95rem; font-weight: normal; color: #666; }
+  .vocab-card-english  { grid-area: english; font-size: 0.95rem; }
+  .vocab-card-actions  { grid-area: actions; }
+
+  /* No column headers on a phone to explain a lone "-", so drop it and let
+     the reading take the headline role instead. */
+  .vocab-card-kanji.is-empty {
+    display: none;
+  }
+
+  .vocab-card-summary:has(.vocab-card-kanji.is-empty) .vocab-card-hiragana {
+    /* Span the empty kanji column too — left in its own column, the reading
+       is pushed right by the column gap beside a column with nothing in it. */
+    grid-area: 1 / 1 / 2 / 3;
+    font-size: 1.25rem;
     font-weight: bold;
+    color: inherit;
+  }
+
+  /* ~40px: comfortably tappable without crowding the word off the line. */
+  .vocab-card-actions .play-btn,
+  .vocab-card-actions .star-btn,
+  .vocab-card-toggle {
+    min-width: 2.5rem;
+    height: 2.5rem;
+    padding: 0 0.5rem;
+  }
+
+  .vocab-card-details {
+    padding: 0.65rem 0.75rem 0.85rem;
+  }
+
+  /* Label above content: a 7rem label column would eat a third of the card. */
+  .vocab-detail {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.2rem;
+  }
+
+  .vocab-detail-actions > * {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 10px 12px;
   }
 }
 
@@ -1051,7 +1266,7 @@ button:disabled:hover {
 
 /* Deliberately subtle: a pending row is still a real, saved word and its
    hiragana/kanji/English are all correct — only the Example cell is waiting. */
-.row-pending td {
+.vocab-card.row-pending {
   opacity: 0.85;
 }
 

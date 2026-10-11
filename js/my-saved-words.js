@@ -37,13 +37,11 @@ async function loadStarredCsvRows(starredKeysByType) {
 }
 
 function renderSavedWords(rows) {
-  const tableBody = document.querySelector("#savedWordsTable tbody");
-  tableBody.innerHTML = "";
+  const list = document.querySelector("#savedWordsTable .vocab-list");
+  list.innerHTML = "";
 
   if (rows.length === 0) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="7">No saved words yet — click the ☆ next to any word to save it here.</td>`;
-    tableBody.appendChild(tr);
+    vocabListMessage(list, "No saved words yet — click the ☆ next to any word to save it here.");
     return;
   }
 
@@ -53,29 +51,30 @@ function renderSavedWords(rows) {
     const english = row["English"]?.trim().replace(/^"|"$/g, "") || "";
     const example = row["Example"]?.trim().replace(/^"|"$/g, "") || "";
     const translation = row["Translation"]?.trim().replace(/^"|"$/g, "") || "";
+    const more = row["More"]?.trim().replace(/^"|"$/g, "") || "";
     const wordKeyEncoded = encodeURIComponent(row.__wordKey);
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td data-label="Hiragana">${hiragana}</td>
-      <td data-label="Kanji">${kanji || "-"}</td>
-      <td data-label="English">${english}</td>
-      <td data-label="Translation">${translation}</td>
-      <td data-label="Type">${row.__wordType}</td>
-      <td data-label="Play">
-        <button class="play-btn" onclick="playAudio('${wordKeyEncoded}', '${row.__soundDir}')">▶</button>
-      </td>
-      <td data-label="Play Example">
-        <button class="play-btn" onclick="playExampleAudio('${wordKeyEncoded}', '${row.__soundDir}')">🎧</button>
-      </td>
-    `;
-
-    const exampleCell = document.createElement("td");
-    exampleCell.setAttribute("data-label", "Example");
-    exampleCell.innerHTML = example; // Example already contains ruby tags (curated CSV, trusted content)
-    tr.insertBefore(exampleCell, tr.children[3]);
-
-    tableBody.appendChild(tr);
+    // Curated CSV content (trusted, pre-built <ruby>) — see csv-vocab.js.
+    list.appendChild(buildVocabCard({
+      key: `${row.__wordType}::${row.__wordKey}`,
+      hiragana: trustedHtml(hiragana),
+      kanji: kanji ? trustedHtml(kanji) : "-",
+      kanjiEmpty: !kanji,
+      english: trustedHtml(english),
+      actions: [
+        vocabCardButton("▶", "Play word", () => playAudio(wordKeyEncoded, row.__soundDir)),
+      ],
+      details: [
+        { label: "Example", content: example ? trustedHtml(example) : null },
+        { label: "Translation", content: translation ? trustedHtml(translation) : null },
+        { label: "More", content: more ? trustedHtml(more) : null },
+        { label: "Type", content: row.__wordType },
+      ],
+      detailActions: example
+        ? [vocabCardButton("🎧 Play example", "Play example sentence",
+            () => playExampleAudio(wordKeyEncoded, row.__soundDir))]
+        : [],
+    }));
   });
 }
 

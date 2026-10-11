@@ -35,12 +35,13 @@
   </div>
 
   <h1>Japanese Vocabulary</h1>
-  <div style="display: flex; justify-content: start; align-items: center; gap: 10px; margin-bottom: 1em;">
+  <div class="vocab-toolbar">
     <button onclick="shuffleTable()">🔀 Shuffle</button>
     <button onclick="startSequentialPlay()">▶ Play All</button>
     <button id="pauseResumeBtn" onclick="pauseOrResume()">⏸ Pause</button>
     <button onclick="stopSequentialPlay()">⏹ Stop</button>
     <button onclick="resetTable()">🔄 Default</button>
+    <button id="expandAllBtn" type="button">⊞ Expand all</button>
     <label for="rowsPerPageSelect">Rows per page:</label>
     <select id="rowsPerPageSelect" onchange="changeRowsPerPage(this.value)">
       <option value="10">10</option>
@@ -49,28 +50,21 @@
     </select>
   </div>
 
-  <table id="vocabTable">
-    <thead>
-      <tr>
-        <th style="width: 9%;">Hiragana</th>
-        <th style="width: 9%;">Kanji</th>
-        <th style="width: 11%;">English</th>
-        <th style="width: 23%;">Example</th>
-        <th style="width: 13%;">Translation</th>
-        <th style="width: 13%;">More</th>
-        <th style="width: 11%;">Play</th>
-        <th style="width: 11%;">Play Example</th>
-
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <!-- Cards are built by js/vocab-cards.js; the header row only shows on
+       wide screens, where the cards line up like table columns. -->
+  <div id="vocabTable" class="vocab-cards">
+    <div class="vocab-list-header" aria-hidden="true">
+      <span>Hiragana</span><span>Kanji</span><span>English</span><span></span>
+    </div>
+    <div class="vocab-list"></div>
+  </div>
 
   <div id="paginationControls" style="display: flex; justify-content: center; gap: 5px; margin-top: 1em;"></div>
 
   <audio id="audioPlayer" class="audio-player" controls></audio>
 
   <script src="js/vocab-page.js"></script>
+  <script src="js/vocab-cards.js"></script>
   <script src="js/csv-vocab.js"></script>
   <script src="js/audio-player.js"></script>
   <script src="js/sidebar-nav.js"></script>

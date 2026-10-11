@@ -55,6 +55,7 @@ page-*.jpeg
 
 # Logs
 *.log
+todo.txt
 
 # Claude
 .claude/settings.local.json

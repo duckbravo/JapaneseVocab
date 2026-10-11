@@ -44,21 +44,18 @@
     leave this page — they'll be here when you come back.
   </p>
 
-  <table id="customVocabTable" style="display: none;">
-    <thead>
-      <tr>
-        <th style="width: 10%;">Hiragana</th>
-        <th style="width: 10%;">Kanji</th>
-        <th style="width: 13%;">English</th>
-        <th style="width: 36%;">Example</th>
-        <th style="width: 19%;">More</th>
-        <th style="width: 12%;">Actions</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div id="customVocabTable" class="vocab-cards" style="display: none;">
+    <div class="vocab-toolbar">
+      <button id="expandAllBtn" type="button">⊞ Expand all</button>
+    </div>
+    <div class="vocab-list-header" aria-hidden="true">
+      <span>Hiragana</span><span>Kanji</span><span>English</span><span></span>
+    </div>
+    <div class="vocab-list"></div>
+  </div>
 
   <script src="js/vocab-page.js"></script>
+  <script src="js/vocab-cards.js"></script>
   <script src="js/sidebar-nav.js"></script>
   <script type="module" src="js/auth-ui.js"></script>
   <script src="js/saved-words.js"></script>

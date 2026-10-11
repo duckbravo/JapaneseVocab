@@ -12,6 +12,11 @@ there's a strong reason to change it; the whole architecture (module loading,
 script ordering) is built around plain `<script>` tags working correctly
 with zero tooling.
 
+For a general-audience tour of the folder/file structure (not this file's
+technical depth), see `ARCHITECTURE.md`; for a per-function summary of every
+JS file, see `FUNCTION_REFERENCE.md`. Both are living documents — update
+them whenever a change adds, removes, renames, or repurposes a file.
+
 ## Commands
 
 - **Run locally**: run **`dev.cmd`** on Windows / **`./dev.sh`** on macOS or
@@ -108,10 +113,26 @@ an HTML file again.
 Shared modules and their responsibilities:
 - `js/vocab-page.js` — holds `vocabConfig` and `initVocabPage()`, the
   per-page config entry point.
-- `js/csv-vocab.js` — CSV fetch/parse (PapaParse), pagination, table
-  rendering, shuffle/reset. Rendering uses `innerHTML` for the `Example`/
-  `More` columns because the CSVs are site-owner-curated and already contain
-  trusted `<ruby>` HTML.
+- `js/vocab-cards.js` — the **collapsible word card** every list renders
+  (index, i-adjectives, My Saved Words, My Vocab); there are no `<table>`s
+  any more. `buildVocabCard()` takes hiragana/kanji/English + always-visible
+  `actions` (▶, ☆) for the summary row, and `details`/`detailActions`
+  (examples, translation, More, 🎧, edit/delete) for the panel a tap opens.
+  Strings always go in via `textContent`; markup must arrive as a Node, which
+  is how the trusted/untrusted split below is preserved — curated pages pass
+  `trustedHtml(...)`, custom vocab passes `renderFurigana()` fragments.
+  Open/closed state is kept in a Map **keyed by word, not on the DOM**,
+  because every list re-renders wholesale (pagination, shuffle, login, and My
+  Vocab's 4-second pending poll) and DOM state would snap cards shut. A
+  pending/failed generation also gets a summary-row **badge**, so a failed
+  background job stays visible while its card is collapsed. Desktop: one
+  shared `--vocab-cols` grid template lines the cards up under a header row
+  like table columns. Phone (≤768px): word + reading on one line, English
+  below, buttons right.
+- `js/csv-vocab.js` — CSV fetch/parse (PapaParse), pagination, card
+  rendering, shuffle/reset. Wraps the `Example`/`More` fields in
+  `trustedHtml()` (i.e. `innerHTML`) because the CSVs are site-owner-curated
+  and already contain trusted `<ruby>` HTML.
 - `js/audio-player.js` — single-word and "play all" sequential audio
   playback. `playAudio(text, soundDir)` / `playExampleAudio(text, soundDir)`
   take an optional explicit `soundDir` (used by the cross-source saved-words

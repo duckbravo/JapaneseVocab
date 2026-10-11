@@ -34,25 +34,20 @@
     Please <a href="#" id="guestLoginLink">log in</a> to see your saved words.
   </p>
 
-  <table id="savedWordsTable" style="display: none;">
-    <thead>
-      <tr>
-        <th style="width: 10%;">Hiragana</th>
-        <th style="width: 10%;">Kanji</th>
-        <th style="width: 13%;">English</th>
-        <th style="width: 26%;">Example</th>
-        <th style="width: 14%;">Translation</th>
-        <th style="width: 10%;">Type</th>
-        <th style="width: 8.5%;">Play</th>
-        <th style="width: 8.5%;">Play Example</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div id="savedWordsTable" class="vocab-cards" style="display: none;">
+    <div class="vocab-toolbar">
+      <button id="expandAllBtn" type="button">⊞ Expand all</button>
+    </div>
+    <div class="vocab-list-header" aria-hidden="true">
+      <span>Hiragana</span><span>Kanji</span><span>English</span><span></span>
+    </div>
+    <div class="vocab-list"></div>
+  </div>
 
   <audio id="audioPlayer" class="audio-player" controls></audio>
 
   <script src="js/vocab-page.js"></script>
+  <script src="js/vocab-cards.js"></script>
   <script src="js/audio-player.js"></script>
   <script src="js/sidebar-nav.js"></script>
   <script type="module" src="js/auth-ui.js"></script>

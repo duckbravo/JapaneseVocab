@@ -1,5 +1,6 @@
-// CSV loading, pagination, and table rendering shared by every vocab page.
-// Depends on vocabConfig from vocab-page.js.
+// CSV loading, pagination, and card rendering shared by every vocab page.
+// Depends on vocabConfig from vocab-page.js and buildVocabCard/trustedHtml
+// from vocab-cards.js.
 
 let originalVocabData = [];
 let currentVocabData = [];
@@ -53,8 +54,8 @@ function setupPagination() {
 
 function displayPage(page) {
   currentPage = page;
-  const tableBody = document.querySelector("#vocabTable tbody");
-  tableBody.innerHTML = "";
+  const list = document.querySelector("#vocabTable .vocab-list");
+  list.innerHTML = "";
 
   const startIndex = (page - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
@@ -70,36 +71,29 @@ function displayPage(page) {
 
     const displayKanji = kanji || hiragana;
     const wordKeyEncoded = encodeURIComponent(displayKanji);
-    const starred = typeof isWordStarred === "function" && isWordStarred(vocabConfig.wordType, displayKanji);
-    const tr = document.createElement("tr");
 
-    tr.innerHTML = `
-    <td data-label="Hiragana">${hiragana}</td>
-    <td data-label="Kanji">${kanji || "-"}</td>
-    <td data-label="English">${english}</td>
-    <td data-label="Translation">${translation}</td>
-    <td data-label="Play">
-      <button class="play-btn" onclick="playAudio('${wordKeyEncoded}')">▶</button>
-      <button class="star-btn${starred ? " starred" : ""}" data-word-type="${vocabConfig.wordType}" data-word-key="${wordKeyEncoded}" onclick="toggleStar(this)">${starred ? "★" : "☆"}</button>
-    </td>
-    <td data-label="Play Example">
-        <button class="play-btn" onclick="playExampleAudio('${wordKeyEncoded}')">🎧</button>
-    </td>
-   `;
-
-    const exampleCell = document.createElement("td");
-    exampleCell.setAttribute("data-label", "Example");
-    exampleCell.innerHTML = example; // Example already contains ruby tags
-    tr.insertBefore(exampleCell, tr.children[3]);
-
-    if (vocabConfig.hasMore) {
-      const moreCell = document.createElement("td");
-      moreCell.setAttribute("data-label", "More");
-      moreCell.innerHTML = more;
-      tr.insertBefore(moreCell, tr.children[5]); // Insert after Translation
-    }
-
-    tableBody.appendChild(tr);
+    // Curated CSV content is site-owner-written and already carries <ruby>
+    // markup, so it goes through trustedHtml() — exactly as the table cells'
+    // innerHTML did before. Never copy this pattern for custom vocab.
+    list.appendChild(buildVocabCard({
+      key: `${vocabConfig.wordType}::${displayKanji}`,
+      hiragana: trustedHtml(hiragana),
+      kanji: kanji ? trustedHtml(kanji) : "-",
+      kanjiEmpty: !kanji,
+      english: trustedHtml(english),
+      actions: [
+        vocabCardButton("▶", "Play word", () => playAudio(wordKeyEncoded)),
+        buildStarButton(vocabConfig.wordType, displayKanji),
+      ],
+      details: [
+        { label: "Example", content: example ? trustedHtml(example) : null },
+        { label: "Translation", content: translation ? trustedHtml(translation) : null },
+        { label: "More", content: vocabConfig.hasMore && more ? trustedHtml(more) : null },
+      ],
+      detailActions: example
+        ? [vocabCardButton("🎧 Play example", "Play example sentence", () => playExampleAudio(wordKeyEncoded))]
+        : [],
+    }));
   });
 }
 

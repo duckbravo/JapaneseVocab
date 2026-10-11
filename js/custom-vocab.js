@@ -171,17 +171,16 @@ function renderGenerationState(row) {
 }
 
 // Every kept example (up to MAX_DISPLAYED_EXAMPLES), each with its own
-// translation stacked underneath it — not just the first one. There's a
-// separate "More" column (see renderMoreCell) for the short indicative
-// phrases that DO mirror the curated pages' single-Example shape; this
-// column is deliberately richer, since custom vocab isn't limited to that
-// fixed 1-example shape the way the curated CSVs are.
-function renderExampleCell(row) {
-  const cell = document.createElement("td");
-  cell.setAttribute("data-label", "Example");
+// translation stacked underneath it — not just the first one. The short
+// indicative phrases have their own "More" section (see renderMoreList); this
+// one is deliberately richer, since custom vocab isn't limited to the curated
+// CSVs' fixed 1-example shape. Returns null when there's nothing to show, so
+// the card leaves the section out instead of printing an empty heading.
+function renderExampleList(row) {
+  const wrap = document.createElement("div");
 
   const state = renderGenerationState(row);
-  if (state) cell.appendChild(state);
+  if (state) wrap.appendChild(state);
 
   examplesOf(row)
     .slice(0, MAX_DISPLAYED_EXAMPLES)
@@ -197,21 +196,18 @@ function renderExampleCell(row) {
         entry.appendChild(translation);
       }
 
-      cell.appendChild(entry);
+      wrap.appendChild(entry);
     });
 
-  return cell;
+  return wrap.childNodes.length ? wrap : null;
 }
 
-function renderMoreCell(row) {
-  const cell = document.createElement("td");
-  cell.setAttribute("data-label", "More");
-
+function renderMoreList(row) {
   const items = Array.isArray(row.more) ? row.more.slice(0, 2) : [];
+  if (items.length === 0) return null;
 
-  items.forEach((ex, i) => {
-    if (i > 0) cell.appendChild(document.createElement("br"));
-
+  const wrap = document.createElement("div");
+  items.forEach((ex) => {
     const entry = document.createElement("span");
     entry.className = "more-entry";
     entry.appendChild(renderFurigana(ex.furigana || ""));
@@ -223,97 +219,97 @@ function renderMoreCell(row) {
       entry.appendChild(gloss);
     }
 
-    cell.appendChild(entry);
+    wrap.appendChild(entry);
   });
 
-  return cell;
+  return wrap;
+}
+
+/**
+ * Pitch accent, in the details panel rather than under the reading: it's
+ * reference detail like the examples, and two lines in the summary row made
+ * collapsed cards uneven heights. Null when the word has no pitch data
+ * (manually added words, or ones the dictionary didn't know), so the section
+ * is left out instead of showing an empty heading.
+ */
+function renderPitchSection(row) {
+  if (!Array.isArray(row.pitch) || row.pitch.length === 0) return null;
+  return renderPitch(row.pitch);
+}
+
+/**
+ * Pending/failed must stay visible on a COLLAPSED card. The full banner (with
+ * Retry) lives in the details panel, but the whole point of the red flag is
+ * that a failed background job can't go unnoticed — so the summary gets a
+ * small badge that opens the card when tapped.
+ */
+function renderStatusBadge(row) {
+  if (row.example_status !== "pending" && row.example_status !== "failed") return null;
+  const failed = row.example_status === "failed";
+  const badge = document.createElement("span");
+  badge.className = `vocab-card-badge ${failed ? "badge-failed" : "badge-pending"}`;
+  badge.textContent = failed ? "⚠️ Examples failed" : "⏳ Writing…";
+  return badge;
 }
 
 function renderCustomVocabTable(rows) {
-  const tableBody = document.querySelector("#customVocabTable tbody");
-  tableBody.innerHTML = "";
+  const list = document.querySelector("#customVocabTable .vocab-list");
+  list.innerHTML = "";
 
   if (rows.length === 0) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 6;
-    td.textContent = "You haven't added any custom words yet.";
-    tr.appendChild(td);
-    tableBody.appendChild(tr);
+    vocabListMessage(list, "You haven't added any custom words yet.");
     return;
   }
 
   rows.forEach(row => {
-    const tr = document.createElement("tr");
-    if (row.example_status === "pending") tr.className = "row-pending";
-    if (row.example_status === "failed") tr.className = "row-failed";
-
-    const hiraganaCell = document.createElement("td");
-    hiraganaCell.setAttribute("data-label", "Hiragana");
-    hiraganaCell.textContent = row.hiragana;
-    // Pitch accent under the reading, where it belongs — it describes how the
-    // reading is said. Renders nothing at all when the word has no pitch data
-    // (manually added words, or ones the dictionary didn't know).
-    if (Array.isArray(row.pitch) && row.pitch.length) {
-      const pitchLine = document.createElement("div");
-      pitchLine.className = "pitch-line";
-      pitchLine.appendChild(renderPitch(row.pitch));
-      hiraganaCell.appendChild(pitchLine);
-    }
-    tr.appendChild(hiraganaCell);
-
-    const kanjiCell = document.createElement("td");
-    kanjiCell.setAttribute("data-label", "Kanji");
+    // Every value below is user-submitted, so each one is either a plain
+    // string (buildVocabCard sets strings via textContent) or a node built
+    // with DOM APIs. Nothing here may become an HTML string.
     // kanji_usually_kana hides the kanji without deleting it. The row still
     // carries 苺 for いちご — it's used for generating and matching example
     // sentences, and untick the box on the edit form to show it here. The
     // tooltip keeps it discoverable rather than making it feel absent.
+    let kanji = row.kanji || "-";
     if (row.kanji && row.kanji_usually_kana) {
-      kanjiCell.textContent = "–";
-      kanjiCell.title = `Usually written in kana. Kanji on record: ${row.kanji}`;
-      kanjiCell.className = "kanji-hidden";
-    } else {
-      kanjiCell.textContent = row.kanji || "-";
+      kanji = document.createElement("span");
+      kanji.textContent = "–";
+      kanji.title = `Usually written in kana. Kanji on record: ${row.kanji}`;
+      kanji.className = "kanji-hidden";
     }
-    tr.appendChild(kanjiCell);
-
-    const englishCell = document.createElement("td");
-    englishCell.setAttribute("data-label", "English");
-    englishCell.textContent = row.english;
-    tr.appendChild(englishCell);
-
-    tr.appendChild(renderExampleCell(row));
-    tr.appendChild(renderMoreCell(row));
-
-    const actionsCell = document.createElement("td");
-    actionsCell.setAttribute("data-label", "Actions");
-
-    const starred = typeof isWordStarred === "function" && isWordStarred("custom", String(row.id));
-    const starBtn = document.createElement("button");
-    starBtn.className = `star-btn${starred ? " starred" : ""}`;
-    starBtn.textContent = starred ? "★" : "☆";
-    starBtn.dataset.wordType = "custom";
-    starBtn.dataset.wordKey = encodeURIComponent(String(row.id));
-    starBtn.addEventListener("click", () => toggleStar(starBtn));
-    actionsCell.appendChild(starBtn);
 
     const editLink = document.createElement("a");
     editLink.className = "play-btn";
     editLink.href = `add-vocab.html?id=${encodeURIComponent(row.id)}`;
-    editLink.textContent = "✏️";
-    editLink.title = "Edit";
-    actionsCell.appendChild(editLink);
+    editLink.textContent = "✏️ Edit";
 
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "play-btn";
-    deleteBtn.textContent = "🗑️";
-    deleteBtn.title = "Delete";
-    deleteBtn.addEventListener("click", () => deleteWord(row.id));
-    actionsCell.appendChild(deleteBtn);
+    const className =
+      row.example_status === "pending" ? "row-pending" :
+      row.example_status === "failed" ? "row-failed" : "";
 
-    tr.appendChild(actionsCell);
-
-    tableBody.appendChild(tr);
+    list.appendChild(buildVocabCard({
+      key: `custom::${row.id}`,
+      hiragana: row.hiragana,
+      kanji,
+      // Hidden-kanji words still get the muted "–" on phones: it carries a
+      // tooltip and means "deliberately not shown", not "no kanji".
+      kanjiEmpty: !row.kanji,
+      english: row.english,
+      badge: renderStatusBadge(row),
+      className,
+      // No ▶ — custom vocab has no recorded audio (see CLAUDE.md).
+      actions: [buildStarButton("custom", String(row.id))],
+      details: [
+        { label: "Pronunciation", content: renderPitchSection(row) },
+        { label: "Examples", content: renderExampleList(row) },
+        { label: "More", content: renderMoreList(row) },
+      ],
+      // Edit/delete live behind the fold: they're occasional actions, and a
+      // 🗑️ beside ☆ in a compact row is an easy mis-tap on a phone.
+      detailActions: [
+        editLink,
+        vocabCardButton("🗑️ Delete", "Delete word", () => deleteWord(row.id), "btn-danger"),
+      ],
+    }));
   });
 }
 
